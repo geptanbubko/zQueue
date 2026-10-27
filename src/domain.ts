@@ -1,7 +1,7 @@
-// Логика очереди. Состояние комнаты получается последовательным применением
-// событий из журнала (apply). Команды пользователей проверяются в decide и
-// превращаются в события; всё случайное и всё вычисляемое кладётся в payload,
-// чтобы повторное применение журнала давало тот же результат.
+// Логика очереди. Команды пользователей проверяются в decide и превращаются в
+// изменения, которые apply применяет к снимку состояния комнаты. В неизменяемый
+// журнал попадают только изменения из LOGGED: создание комнаты, выдача и отзыв
+// доступа и создание очередей.
 
 export type Role = "owner" | "editor";
 export type Level = 1 | 2 | 3;
@@ -11,6 +11,10 @@ export interface Member {
   name: string;
   role: Role;
   active: boolean;
+  addedBy: string | null;
+  addedAt: string;
+  revokedBy?: string;
+  revokedAt?: string;
 }
 
 export interface Student {
@@ -27,9 +31,9 @@ export interface Settings {
 export interface Session {
   id: string;
   createdAt: string;
+  createdBy: string | null;
   order: string[];
   priority: Record<string, number>;
-  shuffles: number;
   unfinishedFrom: string | null;
   status: "awaiting" | "scored";
   increments?: Record<string, number>;
@@ -46,18 +50,15 @@ export interface RoomState {
   pool: string[];
   urgentMode: boolean;
   priority: Record<string, number>;
-  draft: string[] | null;
-  shuffles: number;
   history: Session[];
 }
 
-export interface DomainEvent {
+export interface Change {
   type: string;
   payload: any;
 }
 
-export interface EventMeta {
-  seq: number;
+export interface ChangeMeta {
   createdAt: string;
   actorId: string | null;
 }
@@ -76,6 +77,9 @@ export class DomainError extends Error {
 function fail(message: string, status = 400): never {
   throw new DomainError(message, status);
 }
+
+/** Изменения, которые записываются в журнал. */
+export const LOGGED = new Set(["room.created", "member.added", "member.revoked", "queue.created"]);
 
 export const DEFAULT_SETTINGS: Settings = { absenceScore: 0.5, tailScore: 1 };
 export const MAX_STUDENTS = 300;
@@ -160,14 +164,10 @@ function idList(value: unknown): string[] {
   return value.filter((id): id is string => typeof id === "string");
 }
 
-function lastSession(state: RoomState): Session | undefined {
-  return state.history[0];
-}
-
 const OWNER_ONLY = new Set(["room.renamed", "member.added", "member.revoked", "room.imported"]);
 
-/** Проверяет команду и возвращает событие, которое нужно записать в журнал. */
-export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideContext): DomainEvent {
+/** Проверяет команду и возвращает изменение, которое нужно применить. */
+export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideContext): Change {
   if (!cmd || typeof cmd.type !== "string") fail("Неизвестная команда.");
   if (!actor.active) fail("Доступ отозван.", 403);
   if (OWNER_ONLY.has(cmd.type) && actor.role !== "owner") {
@@ -179,7 +179,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       const to = normalizeName(cmd.title, 80);
       if (!to) fail("Введите название.");
       if (to === state.title) fail("Название не изменилось.");
-      return { type: cmd.type, payload: { from: state.title, to } };
+      return { type: cmd.type, payload: { to } };
     }
 
     case "member.added": {
@@ -205,7 +205,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       if (from.absenceScore === to.absenceScore && from.tailScore === to.tailScore) {
         fail("Параметры не изменились.");
       }
-      return { type: cmd.type, payload: { from, to } };
+      return { type: cmd.type, payload: { to } };
     }
 
     case "student.added": {
@@ -221,7 +221,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
 
     case "student.removed": {
       const student = findStudent(state, cmd.id) ?? fail("Участник не найден.");
-      return { type: cmd.type, payload: { id: student.id, name: student.name } };
+      return { type: cmd.type, payload: { id: student.id } };
     }
 
     case "student.renamed": {
@@ -232,16 +232,14 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       if (state.students.some((s) => s.id !== student.id && s.name.toLowerCase() === to.toLowerCase())) {
         fail("Такое имя уже есть в списке.");
       }
-      return { type: cmd.type, payload: { id: student.id, from: student.name, to } };
+      return { type: cmd.type, payload: { id: student.id, to } };
     }
 
     case "student.burdenSet": {
       const student = findStudent(state, cmd.id) ?? fail("Участник не найден.");
       const to = parseScore(cmd.burden, "Задержка");
       if (to === student.burden) fail("Значение не изменилось.");
-      const reason = normalizeName(cmd.reason, 200);
-      if (!reason) fail("Укажите причину — она попадёт в журнал.");
-      return { type: cmd.type, payload: { id: student.id, from: student.burden, to, reason } };
+      return { type: cmd.type, payload: { id: student.id, to } };
     }
 
     case "pool.changed": {
@@ -261,40 +259,24 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       if (!state.pool.includes(cmd.id)) fail("Участник не в пуле.");
       const to = cmd.level;
       if (to !== 1 && to !== 2 && to !== 3) fail("Неверный уровень.");
-      const from = priorityLevel(state, cmd.id);
-      if (from === to) fail("Уровень не изменился.");
-      return { type: cmd.type, payload: { id: cmd.id, from, to } };
+      if (priorityLevel(state, cmd.id) === to) fail("Уровень не изменился.");
+      return { type: cmd.type, payload: { id: cmd.id, to } };
     }
 
-    case "draft.shuffled": {
+    case "queue.created": {
       const participants = poolStudents(state);
-      if (participants.length === 0) fail("Добавьте в пул тех, кто сдаёт.");
-      const bands = ([3, 2, 1] as const)
-        .map((level) => participants.filter((s) => priorityLevel(state, s.id) === level))
-        .filter((group) => group.length > 0);
-      const order = bands.flatMap((group) => weightedShuffle(group, ctx.random));
-      return { type: cmd.type, payload: { order } };
-    }
-
-    case "draft.accepted": {
-      if (!state.draft) fail("Сначала перемешайте.");
+      if (participants.length === 0) fail("Отметьте тех, кто сдаёт.");
       if (state.history.some((s) => s.status === "awaiting")) {
-        fail("Сначала начислите задержку за уже принятую очередь.");
+        fail("Сначала начислите задержку за предыдущую очередь.");
       }
-      const seen = idList(cmd.order);
-      if (seen.length !== state.draft.length || seen.some((id, i) => state.draft![i] !== id)) {
-        fail("Очередь уже перемешали заново. Посмотрите на новую.", 409);
+      if (!sameMembers(idList(cmd.pool), state.pool)) {
+        fail("Пул только что изменили. Проверьте список и создайте очередь ещё раз.", 409);
       }
-      if (!sameMembers(state.draft, state.pool)) fail("Очередь не совпадает с пулом. Перемешайте заново.");
-      return {
-        type: cmd.type,
-        payload: {
-          sessionId: ctx.newId(),
-          order: state.draft,
-          priority: prioritySnapshot(state),
-          shuffles: state.shuffles,
-        },
-      };
+      const order = ([3, 2, 1] as const)
+        .map((level) => participants.filter((s) => priorityLevel(state, s.id) === level))
+        .filter((group) => group.length > 0)
+        .flatMap((group) => weightedShuffle(group, ctx.random));
+      return { type: cmd.type, payload: { sessionId: ctx.newId(), order, priority: prioritySnapshot(state) } };
     }
 
     case "session.tailMarked": {
@@ -303,7 +285,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       const from = cmd.from ?? null;
       if (from !== null && !session.order.includes(from)) fail("Участник не из этой очереди.");
       if (from === session.unfinishedFrom) fail("Отметка не изменилась.");
-      return { type: cmd.type, payload: { sessionId: session.id, from, previous: session.unfinishedFrom } };
+      return { type: cmd.type, payload: { sessionId: session.id, from } };
     }
 
     case "session.scored": {
@@ -325,18 +307,12 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       }
       return {
         type: cmd.type,
-        payload: {
-          sessionId: session.id,
-          increments,
-          absent,
-          unfinished: cutoff >= 0 ? order.slice(cutoff) : [],
-          settings: state.settings,
-        },
+        payload: { sessionId: session.id, increments, absent, unfinished: cutoff >= 0 ? order.slice(cutoff) : [] },
       };
     }
 
     case "session.undo": {
-      const last = lastSession(state) ?? fail("Отменять нечего.");
+      const last = state.history[0] ?? fail("Отменять нечего.");
       if (last.status === "awaiting") {
         return { type: "session.cancelled", payload: { sessionId: last.id } };
       }
@@ -390,9 +366,9 @@ function parseImport(state: RoomState, data: any) {
     const session: Session = {
       id: h.id,
       createdAt: typeof h.createdAt === "string" ? h.createdAt : "",
+      createdBy: null,
       order: idList(h.order),
       priority,
-      shuffles: 0,
       unfinishedFrom: typeof h.unfinishedFrom === "string" ? h.unfinishedFrom : null,
       status: h.awaitingScore ? "awaiting" : "scored",
     };
@@ -417,43 +393,68 @@ function parseImport(state: RoomState, data: any) {
   };
 }
 
-export function createdEvent(title: string, owner: { id: string; name: string }): DomainEvent {
+/** Приводит снимок, сохранённый прошлой версией, к текущему формату. */
+export function upgradeState(raw: any): RoomState {
+  const { draft: _draft, shuffles: _shuffles, ...state } = raw;
+  for (const m of state.members) {
+    m.addedBy ??= null;
+    m.addedAt ??= state.createdAt;
+  }
+  for (const s of state.history) {
+    s.createdBy ??= null;
+    delete s.shuffles;
+  }
+  return state as RoomState;
+}
+
+export function createdChange(title: string, owner: { id: string; name: string }): Change {
   return { type: "room.created", payload: { title, owner } };
 }
 
-/** Применяет событие к состоянию. Не меняет исходный объект. */
-export function apply(prev: RoomState | null, event: DomainEvent, meta: EventMeta): RoomState {
-  const p = event.payload;
-  if (event.type === "room.created") {
+/** Применяет изменение к состоянию. Не меняет исходный объект. */
+export function apply(prev: RoomState | null, change: Change, meta: ChangeMeta): RoomState {
+  const p = change.payload;
+  if (change.type === "room.created") {
     return {
       title: p.title,
       createdAt: meta.createdAt,
       settings: { ...DEFAULT_SETTINGS },
-      members: [{ id: p.owner.id, name: p.owner.name, role: "owner", active: true }],
+      members: [
+        { id: p.owner.id, name: p.owner.name, role: "owner", active: true, addedBy: null, addedAt: meta.createdAt },
+      ],
       students: [],
       pool: [],
       urgentMode: false,
       priority: {},
-      draft: null,
-      shuffles: 0,
       history: [],
     };
   }
-  if (!prev) throw new Error(`event ${event.type} before room.created`);
+  if (!prev) throw new Error(`change ${change.type} before room.created`);
   const s: RoomState = structuredClone(prev);
   const student = (id: string) => s.students.find((x) => x.id === id);
   const session = (id: string) => s.history.find((x) => x.id === id);
 
-  switch (event.type) {
+  switch (change.type) {
     case "room.renamed":
       s.title = p.to;
       break;
     case "member.added":
-      s.members.push({ id: p.id, name: p.name, role: "editor", active: true });
+      s.members.push({
+        id: p.id,
+        name: p.name,
+        role: "editor",
+        active: true,
+        addedBy: meta.actorId,
+        addedAt: meta.createdAt,
+      });
       break;
     case "member.revoked": {
       const member = s.members.find((m) => m.id === p.id);
-      if (member) member.active = false;
+      if (member) {
+        member.active = false;
+        member.revokedBy = meta.actorId ?? undefined;
+        member.revokedAt = meta.createdAt;
+      }
       break;
     }
     case "settings.changed":
@@ -461,16 +462,11 @@ export function apply(prev: RoomState | null, event: DomainEvent, meta: EventMet
       break;
     case "student.added":
       s.students.push({ id: p.id, name: p.name, burden: p.burden });
-      s.draft = null;
       break;
     case "student.removed": {
       s.students = s.students.filter((x) => x.id !== p.id);
       s.pool = s.pool.filter((id) => id !== p.id);
       delete s.priority[p.id];
-      if (s.draft) {
-        s.draft = s.draft.filter((id) => id !== p.id);
-        if (s.draft.length === 0) s.draft = null;
-      }
       for (const item of s.history) {
         if (item.status !== "awaiting" || item.unfinishedFrom !== p.id) continue;
         item.unfinishedFrom = item.order[item.order.indexOf(p.id) + 1] ?? null;
@@ -485,45 +481,35 @@ export function apply(prev: RoomState | null, event: DomainEvent, meta: EventMet
     case "student.burdenSet": {
       const target = student(p.id);
       if (target) target.burden = p.to;
-      s.draft = null;
       break;
     }
     case "pool.changed": {
       const removed = new Set<string>(p.removed);
       s.pool = s.pool.filter((id) => !removed.has(id)).concat(p.added);
       for (const id of removed) delete s.priority[id];
-      s.draft = null;
       break;
     }
     case "urgent.toggled":
       s.urgentMode = p.on;
       if (!p.on) s.priority = {};
-      s.draft = null;
       break;
     case "priority.set":
       if (p.to > 1) s.priority[p.id] = p.to;
       else delete s.priority[p.id];
-      s.draft = null;
       break;
-    case "draft.shuffled":
-      s.draft = [...p.order];
-      s.shuffles += 1;
-      break;
-    case "draft.accepted":
+    case "queue.created":
       s.history.unshift({
         id: p.sessionId,
         createdAt: meta.createdAt,
+        createdBy: meta.actorId,
         order: [...p.order],
         priority: { ...p.priority },
-        shuffles: p.shuffles,
         unfinishedFrom: null,
         status: "awaiting",
       });
-      s.draft = null;
       s.pool = [];
       s.priority = {};
       s.urgentMode = false;
-      s.shuffles = 0;
       break;
     case "session.tailMarked": {
       const target = session(p.sessionId);
@@ -541,7 +527,6 @@ export function apply(prev: RoomState | null, event: DomainEvent, meta: EventMet
       target.absent = [...p.absent];
       target.unfinished = [...p.unfinished];
       target.status = "scored";
-      s.draft = null;
       break;
     }
     case "session.scoreReverted": {
@@ -555,7 +540,6 @@ export function apply(prev: RoomState | null, event: DomainEvent, meta: EventMet
       delete target.absent;
       delete target.unfinished;
       target.status = "awaiting";
-      s.draft = null;
       break;
     }
     case "session.cancelled": {
@@ -565,8 +549,6 @@ export function apply(prev: RoomState | null, event: DomainEvent, meta: EventMet
       s.pool = target.order.filter((id) => student(id));
       s.priority = cleanPriority(target.priority, new Set(s.pool));
       s.urgentMode = Object.keys(s.priority).length > 0;
-      s.draft = null;
-      s.shuffles = 0;
       break;
     }
     case "room.imported":
@@ -575,11 +557,9 @@ export function apply(prev: RoomState | null, event: DomainEvent, meta: EventMet
       s.pool = [...p.pool];
       s.urgentMode = p.urgentMode;
       s.priority = { ...p.priority };
-      s.draft = null;
-      s.shuffles = 0;
       break;
     default:
-      throw new Error(`unknown event ${event.type}`);
+      throw new Error(`unknown change ${change.type}`);
   }
   return s;
 }

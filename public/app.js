@@ -240,8 +240,8 @@ function renderHome() {
           <h1>Честная очередь <span>на сдачу</span></h1>
           <p class="lead">
             Порядок выбирается случайно, но тот, кто в прошлый раз стоял в конце или не успел,
-            в следующий раз чаще окажется впереди. Для каждого предмета — своя комната,
-            а каждое изменение видно в открытом журнале.
+            в следующий раз чаще окажется впереди. Для каждого предмета — своя комната
+            с общей историей сдач.
           </p>
         </div>
         <div class="card join">
@@ -290,8 +290,8 @@ function renderHome() {
           </div>
           <div class="card feature">
             <div class="ico">${ICONS.log}</div>
-            <h3>Всё в журнале</h3>
-            <p>Каждое перемешивание и любое изменение параметров записывается с автором и временем. Удалить запись нельзя.</p>
+            <h3>Прозрачная история</h3>
+            <p>Видно, кто и когда составил каждую очередь и кто кому выдал доступ. Эти записи нельзя изменить или удалить.</p>
           </div>
           <div class="card feature">
             <div class="ico">${ICONS.key}</div>
@@ -326,7 +326,7 @@ async function createRoomDialog() {
     body: `<p class="muted small" style="margin:0">Вы станете создателем: сможете менять очередь и выдавать доступ другим.</p>`,
     fields: [
       { name: "title", label: "Предмет или название", placeholder: "Например, ОС — лабы, гр. 21-1", required: true },
-      { name: "name", label: "Ваше имя", placeholder: "Как вас показывать в журнале", required: true },
+      { name: "name", label: "Ваше имя", placeholder: "Как вас показывать в истории", required: true },
     ],
     actions: [{ value: "ok", label: "Создать" }],
   });
@@ -361,8 +361,6 @@ async function openRoom(rawCode) {
     me: null,
     tab: "queue",
     busy: false,
-    journal: null,
-    journalNames: {},
     notice: justCreated === code ? "created" : keyAdded ? "key" : null,
   };
   justCreated = null;
@@ -411,14 +409,11 @@ async function refresh(force = false) {
 }
 
 function applyRoomData(data) {
-  const changed = data.seq !== room.seq;
   room.seq = data.seq;
   room.state = data.state;
   room.me = data.me ?? null;
   rememberRoom(room.code, room.state.title);
-  if (changed) room.journal = null;
   renderRoom();
-  if (changed && room.tab === "log") loadJournal();
 }
 
 async function command(cmd, success) {
@@ -448,7 +443,7 @@ function studentById(id) {
 }
 
 function studentName(id) {
-  return studentById(id)?.name ?? room.journalNames[id] ?? "удалённый участник";
+  return studentById(id)?.name ?? "удалённый участник";
 }
 
 function memberName(id) {
@@ -507,7 +502,6 @@ function renderRoom() {
   const tabs = [
     ["queue", "Очередь", ""],
     ["history", "История", historyCount ? `<span class="count">${historyCount}</span>` : ""],
-    ["log", "Журнал", `<span class="count">${room.seq}</span>`],
     ["settings", "Настройки", ""],
   ];
 
@@ -531,7 +525,6 @@ function renderRoom() {
       </nav>
       ${room.tab === "queue" ? renderQueueTab() : ""}
       ${room.tab === "history" ? renderHistoryTab() : ""}
-      ${room.tab === "log" ? renderLogTab() : ""}
       ${room.tab === "settings" ? renderSettingsTab() : ""}
     </main>`;
 
@@ -634,15 +627,7 @@ function renderQueueTab() {
             : ""
         }
       </div>
-      ${
-        edit
-          ? `<form class="inline-form" data-form="add-student">
-              <input id="new-student" class="input" placeholder="Имя участника" autocomplete="off" maxlength="120" required />
-              <button class="btn">Добавить</button>
-            </form>`
-          : ""
-      }
-      ${s.students.length ? `<div class="people">${people}</div>` : `<div class="empty" style="margin-top:12px">Список пуст. ${edit ? "Добавьте участников или импортируйте файл в настройках." : ""}</div>`}
+      ${s.students.length ? `<div class="people">${people}</div>` : `<div class="empty" style="margin-top:12px">Список пуст. ${edit ? "Добавьте участников во вкладке «Настройки»." : ""}</div>`}
       <p class="hint">Отметьте тех, кто сдаёт сегодня. Вес = 1 + накопленная задержка, шанс считается только внутри пула.</p>
     </section>
     <div class="stack sticky">
@@ -659,18 +644,13 @@ function renderDraw() {
   const last = s.history[0];
   const undoLabel = !last ? "Отменить" : last.status === "awaiting" ? "Отменить очередь" : "Отменить начисление";
 
-  let body;
-  if (s.draft?.length) {
-    body = `<ol class="order">${s.draft
-      .map((id, i) => {
-        const level = levelOf(id);
-        return `<li class="${level === 3 ? "high" : level === 2 ? "mid" : ""}"><span class="pos">${i + 1}</span><span class="name">${esc(studentName(id))}</span></li>`;
-      })
-      .join("")}</ol>`;
-  } else if (awaiting) {
-    body = `<div class="empty" style="margin-top:14px">Очередь принята. Когда станет ясно, кто успел сдать, отметьте это ниже.</div>`;
+  let note;
+  if (awaiting) {
+    note = "Очередь составлена. Когда станет ясно, кто успел сдать, отметьте это ниже и начислите задержку — после этого можно составлять следующую.";
+  } else if (s.pool.length) {
+    note = `В очереди будет ${s.pool.length} ${plural(s.pool.length, "человек", "человека", "человек")}. Порядок выбирается сразу и окончательно.`;
   } else {
-    body = `<div class="empty" style="margin-top:14px">${s.pool.length ? "Нажмите «Перемешать», чтобы получить порядок." : "Отметьте участников, которые сдают сегодня."}</div>`;
+    note = "Отметьте участников, которые сдают сегодня.";
   }
 
   return `<section class="card">
@@ -684,18 +664,17 @@ function renderDraw() {
     ${
       edit
         ? `<div class="toolbar">
-            <button class="btn" data-act="shuffle" ${s.pool.length ? "" : "disabled"}>${ICONS.dice} Перемешать</button>
-            <button class="btn ghost" data-act="accept" ${s.draft?.length && !awaiting ? "" : "disabled"}>Принять</button>
+            <button class="btn" data-act="create-queue" ${s.pool.length && !awaiting ? "" : "disabled"}>${ICONS.dice} Составить очередь</button>
             <button class="btn danger" data-act="undo" ${last ? "" : "disabled"}>${undoLabel}</button>
           </div>`
         : ""
     }
-    ${body}
-    <div class="stat-row">
-      <span>Перемешиваний с прошлой сдачи: <b>${s.shuffles}</b></span>
-      ${s.urgentMode ? `<span>Высокий: <b>${s.pool.filter((id) => levelOf(id) === 3).length}</b> · средний: <b>${s.pool.filter((id) => levelOf(id) === 2).length}</b></span>` : ""}
-    </div>
-    ${awaiting && s.draft?.length ? `<p class="hint">Принять новую очередь можно после начисления задержки за предыдущую.</p>` : ""}
+    <p class="hint">${esc(note)}</p>
+    ${
+      s.urgentMode
+        ? `<div class="stat-row"><span>Высокий: <b>${s.pool.filter((id) => levelOf(id) === 3).length}</b> · средний: <b>${s.pool.filter((id) => levelOf(id) === 2).length}</b></span></div>`
+        : ""
+    }
   </section>`;
 }
 
@@ -717,8 +696,8 @@ function renderScoring() {
     })
     .join("");
   return `<section class="card">
-    <div class="card-head"><h2>Кто не успел?</h2><span class="badge warn">ожидает начисления</span></div>
-    <p class="muted small" style="margin:0">Очередь от ${esc(fmtDate(session.createdAt, false))}. ${
+    <div class="card-head"><h2>Текущая очередь</h2><span class="badge warn">ожидает начисления</span></div>
+    <p class="muted small" style="margin:0">${esc(fmtDate(session.createdAt, false))}${session.createdBy ? ` · составитель: ${esc(memberName(session.createdBy))}` : ""}. ${
       cutoff >= 0
         ? `С ${cutoff + 1}-го места и до конца — не успели, им +${fmtNum(room.state.settings.tailScore)}.`
         : "Отметьте первого, кто не успел сдать. Если успели все — начисляйте сразу."
@@ -740,147 +719,63 @@ function priorityLine(session) {
   return lines.length ? `<p class="hint">Горящие сроки. ${esc(lines.join(". "))}.</p>` : "";
 }
 
+function sessionCard(session, open) {
+  const scored = session.status === "scored";
+  const items = session.order
+    .map((id, i) => {
+      const tail = session.unfinished?.includes(id);
+      const inc = session.increments?.[id];
+      return `<li class="${tail ? "tail" : ""}"><span class="pos">${i + 1}</span><span class="name">${esc(studentName(id))}</span>
+        ${typeof inc === "number" ? `<span class="delta">+${fmtNum(inc)}</span>` : ""}</li>`;
+    })
+    .join("");
+  const absent = (session.absent || []).map(studentName);
+  const absentInc = session.absent?.length ? session.increments?.[session.absent[0]] : undefined;
+  return `<details class="session" ${open ? "open" : ""}>
+    <summary>
+      <span class="chev">›</span>
+      <span class="when">Очередь · ${esc(fmtDate(session.createdAt))}</span>
+      <span class="badge">${session.order.length} чел.</span>
+      ${scored ? `<span class="badge editor">начислено</span>` : `<span class="badge warn">ожидает начисления</span>`}
+    </summary>
+    <div class="body">
+      ${session.createdBy ? `<p class="muted small" style="margin:0 0 10px">Составитель: ${esc(memberName(session.createdBy))}</p>` : ""}
+      <ol class="order" style="margin-top:0">${items}</ol>
+      ${priorityLine(session)}
+      ${session.unfinished?.length ? `<p class="hint">Не успели: ${esc(session.unfinished.map(studentName).join(", "))}.</p>` : ""}
+      ${absent.length ? `<p class="hint">Не сдавали: ${esc(absent.join(", "))}${typeof absentInc === "number" ? ` (+${fmtNum(absentInc)})` : ""}.</p>` : ""}
+    </div>
+  </details>`;
+}
+
+function accessLine(text, actorId, at) {
+  return `<div class="access-line">
+    <span class="what">${esc(text)}</span>
+    <span class="who">${actorId ? `${esc(memberName(actorId))} · ` : ""}${esc(fmtDate(at))}</span>
+  </div>`;
+}
+
 function renderHistoryTab() {
   const s = room.state;
-  if (!s.history.length) return `<section class="card"><div class="empty">Пока нет принятых очередей.</div></section>`;
-  return `<section>${s.history
-    .map((session, index) => {
-      const scored = session.status === "scored";
-      const items = session.order
-        .map((id, i) => {
-          const tail = session.unfinished?.includes(id);
-          const inc = session.increments?.[id];
-          return `<li class="${tail ? "tail" : ""}"><span class="pos">${i + 1}</span><span class="name">${esc(studentName(id))}</span>
-            ${typeof inc === "number" ? `<span class="delta">+${fmtNum(inc)}</span>` : ""}</li>`;
-        })
-        .join("");
-      const absent = (session.absent || []).map(studentName);
-      const absentInc = session.absent?.length ? session.increments?.[session.absent[0]] : undefined;
-      return `<details class="session" ${index === 0 ? "open" : ""}>
-        <summary>
-          <span class="chev">›</span>
-          <span class="when">${esc(fmtDate(session.createdAt))}</span>
-          <span class="badge">${session.order.length} чел.</span>
-          ${session.shuffles ? `<span class="badge" title="Сколько раз перемешивали перед принятием">${session.shuffles} ${plural(session.shuffles, "перемешивание", "перемешивания", "перемешиваний")}</span>` : ""}
-          ${scored ? `<span class="badge editor">начислено</span>` : `<span class="badge warn">ожидает начисления</span>`}
-        </summary>
-        <div class="body">
-          <ol class="order" style="margin-top:0">${items}</ol>
-          ${priorityLine(session)}
-          ${session.unfinished?.length ? `<p class="hint">Не успели: ${esc(session.unfinished.map(studentName).join(", "))}.</p>` : ""}
-          ${absent.length ? `<p class="hint">Не сдавали: ${esc(absent.join(", "))}${typeof absentInc === "number" ? ` (+${fmtNum(absentInc)})` : ""}.</p>` : ""}
-        </div>
-      </details>`;
-    })
-    .join("")}</section>`;
-}
-
-/* ----- Журнал ----- */
-
-function describeEvent(ev) {
-  const p = ev.payload;
-  const n = (id) => `«${studentName(id)}»`;
-  const list = (ids) => ids.map((id) => studentName(id)).join(", ");
-  switch (ev.type) {
-    case "room.created":
-      return `Комната создана: «${p.title}». Создатель — ${p.owner.name}`;
-    case "room.renamed":
-      return `Название изменено: «${p.from}» → «${p.to}»`;
-    case "member.added":
-      return `Выдан доступ редактора: ${p.name}`;
-    case "member.revoked":
-      return `Отозван доступ: ${p.name}`;
-    case "settings.changed":
-      return `Параметры начисления: «не был в очереди» ${fmtNum(p.from.absenceScore)} → ${fmtNum(p.to.absenceScore)}, «не успел» ${fmtNum(p.from.tailScore)} → ${fmtNum(p.to.tailScore)}`;
-    case "student.added":
-      return `Добавлен участник «${p.name}» с задержкой ${fmtNum(p.burden)}`;
-    case "student.removed":
-      return `Удалён участник «${p.name}»`;
-    case "student.renamed":
-      return `Переименование: «${p.from}» → «${p.to}»`;
-    case "student.burdenSet":
-      return `Задержка ${n(p.id)} изменена вручную: ${fmtNum(p.from)} → ${fmtNum(p.to)}. Причина: ${p.reason}`;
-    case "pool.changed": {
-      const parts = [];
-      if (p.added.length) parts.push(`добавлены ${list(p.added)}`);
-      if (p.removed.length) parts.push(`убраны ${list(p.removed)}`);
-      return `Пул: ${parts.join("; ")}`;
+  const items = s.history.map((session) => ({ at: session.createdAt || "", session }));
+  for (const m of s.members) {
+    if (m.role === "owner") {
+      items.push({ at: s.createdAt, html: accessLine(`Комната создана, создатель — ${m.name}`, null, s.createdAt) });
+      continue;
     }
-    case "urgent.toggled":
-      return p.on ? "Включён режим горящих сроков" : "Выключен режим горящих сроков";
-    case "priority.set":
-      return `Уровень ${n(p.id)}: ${levelLabel(p.from)} → ${levelLabel(p.to)}`;
-    case "draft.shuffled":
-      return `Перемешано: ${list(p.order)}`;
-    case "draft.accepted":
-      return `Очередь принята (${p.order.length} чел., перемешиваний: ${p.shuffles})`;
-    case "session.tailMarked":
-      return p.from ? `Отмечено: не успели начиная с ${n(p.from)}` : "Снята отметка «не успели»";
-    case "session.scored": {
-      const unfinished = p.unfinished.length ? ` Не успели: ${list(p.unfinished)}.` : "";
-      return `Начислена задержка (${Object.keys(p.increments).length} чел.).${unfinished}`;
+    items.push({ at: m.addedAt, html: accessLine(`Выдан доступ редактора: ${m.name}`, m.addedBy, m.addedAt) });
+    if (!m.active && m.revokedAt) {
+      items.push({ at: m.revokedAt, html: accessLine(`Отозван доступ: ${m.name}`, m.revokedBy, m.revokedAt) });
     }
-    case "session.scoreReverted":
-      return "Начисление задержки отменено";
-    case "session.cancelled":
-      return "Принятая очередь отменена, участники возвращены в пул";
-    case "room.imported":
-      return `Импорт данных: ${p.students.length} участников, ${p.history.length} записей истории`;
-    default:
-      return ev.type;
   }
-}
-
-function collectNames(events) {
-  for (const ev of events) {
-    const p = ev.payload;
-    if (ev.type === "student.added" || ev.type === "student.removed") room.journalNames[p.id] = p.name;
-    if (ev.type === "student.renamed") room.journalNames[p.id] ??= p.to;
-    if (ev.type === "room.imported") for (const st of p.students) room.journalNames[st.id] ??= st.name;
-  }
-}
-
-async function loadJournal(more = false) {
-  const current = room;
-  const before = more && current.journal?.length ? current.journal.at(-1).seq : current.seq + 1;
-  try {
-    const data = await api(`/api/rooms/${current.code}/events?before=${before}&limit=50`);
-    if (room !== current) return;
-    collectNames(data.events);
-    current.journal = more ? [...(current.journal || []), ...data.events] : data.events;
-    if (current.tab === "log") renderRoom();
-  } catch (err) {
-    toast(err.message, "error");
-  }
-}
-
-function renderLogTab() {
-  if (!room.journal) {
-    return `<section class="card"><div class="empty">Загрузка журнала…</div></section>`;
-  }
-  const hasMore = room.journal.length && room.journal.at(-1).seq > 1;
-  return `<section class="card">
-    <div class="card-head">
-      <h2>Журнал изменений</h2>
-      <button class="btn ghost sm" data-act="verify">Проверить целостность</button>
-    </div>
-    <p class="muted small" style="margin-top:0">Записи только добавляются: изменить или удалить их нельзя. Текущее состояние комнаты целиком вычисляется из журнала.</p>
-    <ul class="log">
-      ${room.journal
-        .map(
-          (ev) => `<li>
-            <span class="seq">#${ev.seq}</span>
-            <div>
-              <div class="what">${esc(describeEvent(ev))}</div>
-              <div class="who">${esc(ev.actorId ? memberName(ev.actorId) : "система")} · ${esc(fmtDate(ev.createdAt))}</div>
-            </div>
-          </li>`,
-        )
-        .join("")}
-    </ul>
-    ${hasMore ? `<div class="toolbar" style="margin-top:12px"><button class="btn subtle" data-act="log-more">Показать ещё</button></div>` : ""}
+  items.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  const firstSession = items.find((item) => item.session)?.session;
+  return `<section class="history">
+    <p class="muted small" style="margin:0 0 14px">Здесь видно, кто составлял очереди и кто выдавал доступ. Эти записи хранятся в журнале, который нельзя изменить.</p>
+    ${items.map((item) => (item.session ? sessionCard(item.session, item.session === firstSession) : item.html)).join("")}
   </section>`;
 }
+
 
 /* ----- Настройки ----- */
 
@@ -899,9 +794,22 @@ function renderSettingsTab() {
     .join("");
 
   return `<div class="settings-grid">
+    ${
+      edit
+        ? `<section class="card">
+            <h2>Новый участник</h2>
+            <p class="muted small">Новичок получает задержку, равную медиане группы, чтобы не оказаться ни в начале, ни в конце. Переименовать или удалить участника можно кнопкой «⋯» во вкладке «Очередь».</p>
+            <form class="inline-form" data-form="add-student">
+              <input id="new-student" class="input" placeholder="Имя участника" autocomplete="off" maxlength="120" required />
+              <button class="btn">Добавить</button>
+            </form>
+          </section>`
+        : ""
+    }
+
     <section class="card">
       <h2>Параметры начисления</h2>
-      <p class="muted small">Место в очереди даёт от 0 (первый) до 1 (последний). Остальное настраивается здесь; изменения попадут в журнал.</p>
+      <p class="muted small">Место в очереди даёт от 0 (первый) до 1 (последний). Остальное настраивается здесь.</p>
       <form class="form-grid" data-form="settings">
         <label class="field">Не был в очереди
           <input id="set-absence" class="input" type="number" step="0.05" min="0" max="100" value="${s.settings.absenceScore}" ${edit ? "" : "disabled"} />
@@ -941,7 +849,7 @@ function renderSettingsTab() {
             ${
               s.history.length === 0
                 ? `<h3>Перенос из старой версии</h3>
-                  <p class="muted small" style="margin-top:0">Загрузите queue-data.json — список группы, задержки и история попадут в комнату одной записью журнала.</p>
+                  <p class="muted small" style="margin-top:0">Загрузите queue-data.json — список группы, задержки и история перенесутся в комнату.</p>
                   <label class="btn ghost">Выбрать файл<input type="file" accept="application/json,.json" data-act="import" hidden /></label>`
                 : ""
             }
@@ -969,7 +877,7 @@ async function studentMenu(id) {
   if (!st) return;
   const pick = await dialog({
     title: st.name,
-    body: `<p class="muted small" style="margin:0">Задержка ${fmtNum(st.burden)}. Любое действие попадёт в журнал.</p>`,
+    body: `<p class="muted small" style="margin:0">Задержка ${fmtNum(st.burden)}.</p>`,
     actions: [
       { value: "rename", label: "Переименовать", kind: "ghost" },
       { value: "burden", label: "Изменить задержку", kind: "ghost" },
@@ -991,14 +899,13 @@ async function studentMenu(id) {
       body: `<p class="muted small" style="margin:0">${esc(st.name)} · сейчас ${fmtNum(st.burden)}</p>`,
       fields: [
         { name: "burden", label: "Новое значение", type: "number", step: "0.01", min: 0, value: st.burden, required: true },
-        { name: "reason", label: "Причина", placeholder: "Будет видна в журнале", required: true },
       ],
     });
-    if (v) command({ type: "student.burdenSet", id, burden: v.burden, reason: v.reason }, "Задержка изменена");
+    if (v) command({ type: "student.burdenSet", id, burden: v.burden }, "Задержка изменена");
   } else if (pick.action === "remove") {
     const v = await dialog({
       title: "Удалить участника?",
-      body: `<p style="margin:0">${esc(st.name)} пропадёт из списка. В истории и журнале запись останется.</p>`,
+      body: `<p style="margin:0">${esc(st.name)} пропадёт из списка. В прошлых очередях имя останется.</p>`,
       actions: [{ value: "ok", label: "Удалить", kind: "danger" }],
     });
     if (v) command({ type: "student.removed", id }, "Участник удалён");
@@ -1028,7 +935,7 @@ async function importFile(file) {
   const count = Array.isArray(data?.students) ? data.students.length : 0;
   const ok = await dialog({
     title: "Импортировать данные?",
-    body: `<p style="margin:0">Список участников (${count}) и история заменят текущие. Это попадёт в журнал.</p>`,
+    body: `<p style="margin:0">Список участников (${count}) и история заменят текущие.</p>`,
     actions: [{ value: "ok", label: "Импортировать" }],
   });
   if (ok) command({ type: "room.imported", data }, "Данные перенесены");
@@ -1040,7 +947,6 @@ app.addEventListener("click", async (event) => {
   if (tab) {
     room.tab = tab.getAttribute("data-tab");
     renderRoom();
-    if (room.tab === "log" && !room.journal) loadJournal();
     return;
   }
   const copy = event.target.closest("[data-copy]");
@@ -1077,21 +983,18 @@ app.addEventListener("click", async (event) => {
     case "student-menu":
       studentMenu(id);
       break;
-    case "shuffle":
-      command({ type: "draft.shuffled" });
-      break;
-    case "accept":
-      command({ type: "draft.accepted", order: s.draft }, "Очередь принята");
+    case "create-queue":
+      command({ type: "queue.created", pool: [...s.pool] }, "Очередь составлена");
       break;
     case "undo": {
       const last = s.history[0];
       const ok = await dialog({
-        title: last.status === "awaiting" ? "Отменить принятую очередь?" : "Отменить начисление?",
+        title: last.status === "awaiting" ? "Отменить очередь?" : "Отменить начисление?",
         body: `<p style="margin:0">${
           last.status === "awaiting"
-            ? "Участники вернутся в пул, задержка не изменится."
+            ? "Участники вернутся в пул, задержка не изменится. Запись о том, кто составлял очередь, останется в журнале."
             : "Начисленная задержка будет вычтена, очередь снова будет ждать начисления."
-        } Отмена тоже запишется в журнал.</p>`,
+        }</p>`,
         actions: [{ value: "ok", label: "Отменить", kind: "danger" }],
       });
       if (ok) command({ type: "session.undo" }, "Отменено");
@@ -1107,23 +1010,12 @@ app.addEventListener("click", async (event) => {
       const m = s.members.find((x) => x.id === id);
       const ok = await dialog({
         title: "Отозвать доступ?",
-        body: `<p style="margin:0">${esc(m?.name)} больше не сможет вносить изменения. Его прошлые действия останутся в журнале.</p>`,
+        body: `<p style="margin:0">${esc(m?.name)} больше не сможет вносить изменения. Запись о выдаче доступа останется в истории.</p>`,
         actions: [{ value: "ok", label: "Отозвать", kind: "danger" }],
       });
       if (ok) command({ type: "member.revoked", id }, "Доступ отозван");
       break;
     }
-    case "verify":
-      try {
-        const res = await api(`/api/rooms/${room.code}/verify`);
-        toast(res.ok ? `Журнал цел: ${res.events} записей, состояние совпадает` : `Проблема: ${res.reason}`, res.ok ? "" : "error");
-      } catch (err) {
-        toast(err.message, "error");
-      }
-      break;
-    case "log-more":
-      loadJournal(true);
-      break;
     case "forget-key": {
       const ok = await dialog({
         title: "Выйти на этом устройстве?",

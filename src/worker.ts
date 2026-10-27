@@ -1,12 +1,14 @@
 import {
   apply,
-  createdEvent,
+  createdChange,
   decide,
   DomainError,
+  LOGGED,
   normalizeName,
-  type DomainEvent,
+  type Change,
   type Member,
   type RoomState,
+  upgradeState,
 } from "./domain";
 
 interface RoomRow {
@@ -84,15 +86,20 @@ async function currentMember(env: Env, req: Request, room: RoomRow, state: RoomS
   return state.members.find((m) => m.id === row.id && m.active) ?? null;
 }
 
-function eventInsert(env: Env, roomId: string, seq: number, event: DomainEvent, actorId: string | null, at: string) {
+// Запись в журнал выполняется, только если предыдущий запрос пакета что-то
+// изменил (changes() = 1), то есть если снимок комнаты действительно обновился.
+function logInsert(env: Env, roomId: string, change: Change, actorId: string | null, at: string) {
   return env.DB.prepare(
-    "INSERT INTO events (room_id, seq, type, payload, actor_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-  ).bind(roomId, seq, event.type, JSON.stringify(event.payload), actorId, at);
+    `INSERT INTO events (room_id, seq, type, payload, actor_id, created_at)
+     SELECT ?1, (SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE room_id = ?1), ?2, ?3, ?4, ?5
+     WHERE changes() = 1`,
+  ).bind(roomId, change.type, JSON.stringify(change.payload), actorId, at);
 }
 
-function isConflict(err: unknown): boolean {
-  const message = String((err as Error)?.message ?? err);
-  return message.includes("UNIQUE constraint failed") || message.includes("seq gap");
+function memberInsert(env: Env, id: string, roomId: string, tokenHash: string, at: string) {
+  return env.DB.prepare(
+    "INSERT INTO members (id, room_id, token_hash, created_at) SELECT ?, ?, ?, ? WHERE changes() = 1",
+  ).bind(id, roomId, tokenHash, at);
 }
 
 async function createRoom(env: Env, req: Request): Promise<Response> {
@@ -106,28 +113,25 @@ async function createRoom(env: Env, req: Request): Promise<Response> {
   const owner = { id: crypto.randomUUID(), name };
   const token = randomToken();
   const tokenHash = await sha256(token);
-  const event = createdEvent(title, owner);
+  const change = createdChange(title, owner);
   const now = new Date().toISOString();
-  const state = apply(null, event, { seq: 1, createdAt: now, actorId: owner.id });
+  const state = apply(null, change, { createdAt: now, actorId: owner.id });
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = randomCode();
+    const exists = await env.DB.prepare("SELECT 1 FROM rooms WHERE code = ?").bind(code).first();
+    if (exists) continue;
     try {
       await env.DB.batch([
         env.DB.prepare(
           "INSERT INTO rooms (id, code, seq, state, created_at, updated_at) VALUES (?, ?, 1, ?, ?, ?)",
         ).bind(roomId, code, JSON.stringify(state), now, now),
-        eventInsert(env, roomId, 1, event, owner.id, now),
-        env.DB.prepare("INSERT INTO members (id, room_id, token_hash, created_at) VALUES (?, ?, ?, ?)").bind(
-          owner.id,
-          roomId,
-          tokenHash,
-          now,
-        ),
+        logInsert(env, roomId, change, owner.id, now),
+        memberInsert(env, owner.id, roomId, tokenHash, now),
       ]);
       return json({ code, token, seq: 1, state, me: state.members[0] }, 201);
     } catch (err) {
-      if (!isConflict(err)) throw err;
+      if (!String((err as Error)?.message).includes("UNIQUE constraint failed")) throw err;
     }
   }
   throw new HttpError(503, "Не удалось подобрать код комнаты, попробуйте ещё раз.");
@@ -137,7 +141,7 @@ async function getRoom(env: Env, req: Request, code: string, url: URL): Promise<
   const room = await loadRoom(env, code);
   const since = Number(url.searchParams.get("since"));
   if (since === room.seq) return json({ code: room.code, seq: room.seq, unchanged: true });
-  const state = JSON.parse(room.state) as RoomState;
+  const state = upgradeState(JSON.parse(room.state));
   const me = await currentMember(env, req, room, state);
   return json({ code: room.code, seq: room.seq, state, me });
 }
@@ -146,16 +150,15 @@ async function runCommand(env: Env, req: Request, code: string): Promise<Respons
   const cmd = await readJson(req);
   for (let attempt = 0; attempt < 5; attempt++) {
     const room = await loadRoom(env, code);
-    const state = JSON.parse(room.state) as RoomState;
+    const state = upgradeState(JSON.parse(room.state));
     const me = await currentMember(env, req, room, state);
     if (!me) throw new HttpError(403, "Только создатель комнаты и назначенные им люди могут вносить изменения.");
 
-    const event = decide(state, cmd, me, { newId: () => crypto.randomUUID(), random: secureRandom });
+    const change = decide(state, cmd, me, { newId: () => crypto.randomUUID(), random: secureRandom });
     const seq = room.seq + 1;
     const now = new Date().toISOString();
-    const next = apply(state, event, { seq, createdAt: now, actorId: me.id });
+    const next = apply(state, change, { createdAt: now, actorId: me.id });
     const statements = [
-      eventInsert(env, room.id, seq, event, me.id, now),
       env.DB.prepare("UPDATE rooms SET seq = ?, state = ?, updated_at = ? WHERE id = ? AND seq = ?").bind(
         seq,
         JSON.stringify(next),
@@ -164,33 +167,24 @@ async function runCommand(env: Env, req: Request, code: string): Promise<Respons
         room.seq,
       ),
     ];
+    if (LOGGED.has(change.type)) statements.push(logInsert(env, room.id, change, me.id, now));
     let token: string | undefined;
-    if (event.type === "member.added") {
+    if (change.type === "member.added") {
       token = randomToken();
-      statements.push(
-        env.DB.prepare("INSERT INTO members (id, room_id, token_hash, created_at) VALUES (?, ?, ?, ?)").bind(
-          event.payload.id,
-          room.id,
-          await sha256(token),
-          now,
-        ),
-      );
+      statements.push(memberInsert(env, change.payload.id, room.id, await sha256(token), now));
     }
-    try {
-      await env.DB.batch(statements);
-    } catch (err) {
-      if (isConflict(err)) continue;
-      throw err;
-    }
+    const results = await env.DB.batch(statements);
+    // Снимок успели изменить параллельно — пересчитываем на свежих данных.
+    if (results[0].meta.changes !== 1) continue;
     const me2 = next.members.find((m) => m.id === me.id && m.active) ?? null;
-    return json({ code: room.code, seq, state: next, me: me2, event: { seq, ...event }, token });
+    return json({ code: room.code, seq, state: next, me: me2, change, token });
   }
   throw new HttpError(409, "Комнату одновременно меняют другие, попробуйте ещё раз.");
 }
 
 async function listEvents(env: Env, code: string, url: URL): Promise<Response> {
   const room = await loadRoom(env, code);
-  const before = Number(url.searchParams.get("before")) || room.seq + 1;
+  const before = Number(url.searchParams.get("before")) || Number.MAX_SAFE_INTEGER;
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 200);
   const { results } = await env.DB.prepare(
     "SELECT seq, type, payload, actor_id, created_at FROM events WHERE room_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
@@ -198,7 +192,6 @@ async function listEvents(env: Env, code: string, url: URL): Promise<Response> {
     .bind(room.id, before, limit)
     .all<{ seq: number; type: string; payload: string; actor_id: string | null; created_at: string }>();
   return json({
-    seq: room.seq,
     events: results.map((r) => ({
       seq: r.seq,
       type: r.type,
@@ -207,29 +200,6 @@ async function listEvents(env: Env, code: string, url: URL): Promise<Response> {
       createdAt: r.created_at,
     })),
   });
-}
-
-/** Пересчитывает состояние из журнала и сравнивает со снимком. */
-async function verifyRoom(env: Env, code: string): Promise<Response> {
-  const room = await loadRoom(env, code);
-  const { results } = await env.DB.prepare(
-    "SELECT seq, type, payload, actor_id, created_at FROM events WHERE room_id = ? ORDER BY seq",
-  )
-    .bind(room.id)
-    .all<{ seq: number; type: string; payload: string; actor_id: string | null; created_at: string }>();
-  let state: RoomState | null = null;
-  let expected = 1;
-  for (const row of results) {
-    if (row.seq !== expected) return json({ ok: false, reason: `пропуск в журнале на №${expected}` });
-    state = apply(state, { type: row.type, payload: JSON.parse(row.payload) }, {
-      seq: row.seq,
-      createdAt: row.created_at,
-      actorId: row.actor_id,
-    });
-    expected += 1;
-  }
-  const ok = results.length === room.seq && JSON.stringify(state) === room.state;
-  return json({ ok, events: results.length, reason: ok ? null : "снимок не совпадает с журналом" });
 }
 
 async function route(req: Request, env: Env, url: URL): Promise<Response> {
@@ -242,7 +212,6 @@ async function route(req: Request, env: Env, url: URL): Promise<Response> {
   if (action === "" && req.method === "GET") return getRoom(env, req, code, url);
   if (action === "commands" && req.method === "POST") return runCommand(env, req, code);
   if (action === "events" && req.method === "GET") return listEvents(env, code, url);
-  if (action === "verify" && req.method === "GET") return verifyRoom(env, code);
   throw new HttpError(404, "Не найдено.");
 }
 

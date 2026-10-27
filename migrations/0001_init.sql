@@ -1,5 +1,5 @@
--- Комната хранит снимок состояния, вычисленный из журнала событий.
--- Снимок обновляется только вместе с добавлением события (в одной транзакции).
+-- Комната хранит текущее состояние; seq — номер версии для опроса и защиты
+-- от одновременной записи.
 CREATE TABLE rooms (
   id TEXT PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,
@@ -19,7 +19,8 @@ CREATE TABLE members (
 
 CREATE INDEX members_room ON members(room_id);
 
--- Журнал событий: только добавление, номера идут подряд.
+-- Журнал (создание комнаты, выдача и отзыв доступа, создание очередей):
+-- только добавление, номера идут подряд.
 CREATE TABLE events (
   room_id TEXT NOT NULL REFERENCES rooms(id),
   seq INTEGER NOT NULL,
