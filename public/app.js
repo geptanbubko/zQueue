@@ -6,7 +6,7 @@ const RECENT_KEY = "queue.recent.v1";
 const POLL_MS = 5000;
 
 const ICONS = {
-  logo: `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor" style="color:var(--accent)"/><rect x="7" y="8" width="18" height="4" rx="2" fill="#fff"/><rect x="7" y="14" width="13" height="4" rx="2" fill="#fff" opacity=".8"/><rect x="7" y="20" width="8" height="4" rx="2" fill="#fff" opacity=".6"/></svg>`,
+  logo: `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor" style="color:var(--accent)"/><text x="16" y="21.5" text-anchor="middle" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="16" font-weight="800" letter-spacing="-0.5" fill="#fff">zQ</text></svg>`,
   copy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
   check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`,
   dice: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.2" fill="currentColor"/></svg>`,
@@ -228,11 +228,11 @@ document.addEventListener("visibilitychange", () => {
 /* ---------- Стартовая страница ---------- */
 
 function renderHome() {
-  document.title = "Очередь — честная очередь на сдачу";
+  document.title = "zQueue — честная очередь на сдачу";
   const recent = storage.read(RECENT_KEY, []);
   app.innerHTML = `
     <header class="topbar">
-      <a href="/" data-link class="brand">${ICONS.logo}<span>Очередь</span></a>
+      <a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a>
     </header>
     <main class="container home">
       <section class="hero">
@@ -301,7 +301,7 @@ function renderHome() {
         </div>
       </section>
     </main>
-    <footer class="footer">Очередь · данные комнат хранятся на сервере, ключи — только в вашем браузере</footer>`;
+    <footer class="footer">zQueue · данные комнат хранятся на сервере, ключи — только в вашем браузере</footer>`;
 
   const input = document.getElementById("code-input");
   input.addEventListener("input", () => {
@@ -364,7 +364,7 @@ async function openRoom(rawCode) {
     notice: justCreated === code ? "created" : keyAdded ? "key" : null,
   };
   justCreated = null;
-  app.innerHTML = `<header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>Очередь</span></a></header>
+  app.innerHTML = `<header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a></header>
     <div class="loading">Загрузка комнаты ${esc(code)}…</div>`;
   try {
     await refresh(true);
@@ -390,7 +390,7 @@ async function openRoom(rawCode) {
 
 function renderMissing(code) {
   app.innerHTML = `
-    <header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>Очередь</span></a></header>
+    <header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a></header>
     <main class="container">
       <div class="card" style="max-width:480px;margin:10vh auto;text-align:center">
         <h2 style="margin-bottom:8px">Комната ${esc(code)} не найдена</h2>
@@ -488,7 +488,7 @@ function delayFor(index, count, cutoff) {
 function renderRoom() {
   if (!room?.state) return;
   const s = room.state;
-  document.title = `${s.title} · Очередь`;
+  document.title = `${s.title} · zQueue`;
 
   // Сохраняем введённый текст и фокус, чтобы фоновое обновление их не сбрасывало.
   const kept = {};
@@ -507,7 +507,7 @@ function renderRoom() {
 
   app.innerHTML = `
     <header class="topbar">
-      <a href="/" data-link class="brand" title="На главную">${ICONS.logo}<span>Очередь</span></a>
+      <a href="/" data-link class="brand" title="На главную">${ICONS.logo}<span>zQueue</span></a>
       <div class="room-head">
         <h1 class="room-title">${esc(s.title)}</h1>
         <div class="room-meta">

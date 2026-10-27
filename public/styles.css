@@ -665,7 +665,7 @@ dialog .actions.column { flex-direction: column; align-items: stretch; }
 
 @media (max-width: 640px) {
   .topbar { gap: 10px; }
-  .brand span { display: none; }
+  .topbar:has(.room-head) .brand span { display: none; }
   .room-meta { margin-left: 0; }
   .card { padding: 16px; }
   .person { grid-template-columns: auto 1fr; }
