@@ -1,7 +1,7 @@
 // Логика очереди. Команды пользователей проверяются в decide и превращаются в
 // изменения, которые apply применяет к снимку состояния комнаты. В неизменяемый
 // журнал попадают только изменения из LOGGED: создание комнаты, выдача и отзыв
-// доступа и создание очередей.
+// доступа, создание и отмена очередей.
 
 export type Role = "owner" | "editor";
 export type Level = 1 | 2 | 3;
@@ -35,7 +35,9 @@ export interface Session {
   order: string[];
   priority: Record<string, number>;
   unfinishedFrom: string | null;
-  status: "awaiting" | "scored";
+  status: "awaiting" | "scored" | "cancelled";
+  cancelledAt?: string;
+  cancelledBy?: string | null;
   increments?: Record<string, number>;
   absent?: string[];
   unfinished?: string[];
@@ -79,7 +81,7 @@ function fail(message: string, status = 400): never {
 }
 
 /** Изменения, которые записываются в журнал. */
-export const LOGGED = new Set(["room.created", "member.added", "member.revoked", "queue.created"]);
+export const LOGGED = new Set(["room.created", "member.added", "member.revoked", "queue.created", "session.cancelled"]);
 
 export const DEFAULT_SETTINGS: Settings = { absenceScore: 0.5, tailScore: 1 };
 export const MAX_STUDENTS = 300;
@@ -312,7 +314,8 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
     }
 
     case "session.undo": {
-      const last = state.history[0] ?? fail("Нет действий для отмены.");
+      // Отменённые очереди остаются в истории, но отменять их повторно нельзя.
+      const last = state.history.find((s) => s.status !== "cancelled") ?? fail("Нет действий для отмены.");
       if (last.status === "awaiting") {
         return { type: "session.cancelled", payload: { sessionId: last.id } };
       }
@@ -545,7 +548,10 @@ export function apply(prev: RoomState | null, change: Change, meta: ChangeMeta):
     case "session.cancelled": {
       const target = session(p.sessionId);
       if (!target) break;
-      s.history = s.history.filter((x) => x.id !== target.id);
+      target.status = "cancelled";
+      target.cancelledAt = meta.createdAt;
+      target.cancelledBy = meta.actorId;
+      target.unfinishedFrom = null;
       s.pool = target.order.filter((id) => student(id));
       s.priority = cleanPriority(target.priority, new Set(s.pool));
       s.urgentMode = Object.keys(s.priority).length > 0;

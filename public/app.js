@@ -492,6 +492,10 @@ function awaitingSession() {
   return room.state.history.find((s) => s.status === "awaiting");
 }
 
+function lastActiveSession() {
+  return room.state.history.find((s) => s.status !== "cancelled");
+}
+
 function delayFor(index, count, cutoff) {
   if (cutoff >= 0 && index >= cutoff) return room.state.settings.tailScore;
   return count <= 1 ? 0 : index / (count - 1);
@@ -662,7 +666,7 @@ function renderDraw() {
   const s = room.state;
   const edit = canEdit();
   const awaiting = awaitingSession();
-  const last = s.history[0];
+  const last = lastActiveSession();
   const undoLabel = !last ? "Отменить" : last.status === "awaiting" ? "Отменить очередь" : "Отменить начисление";
 
   let note;
@@ -756,6 +760,10 @@ function priorityLine(session) {
 
 function sessionCard(session, open) {
   const scored = session.status === "scored";
+  const cancelled = session.status === "cancelled";
+  const badge = cancelled
+    ? `<span class="badge cancelled">Отменена</span>`
+    : `<span class="badge ${scored ? "" : "strong"}">${scored ? "Итоги подведены" : "Ожидает подведения итогов"}</span>`;
   const rows = session.order
     .map((id, i) => {
       const tail = session.unfinished?.includes(id);
@@ -770,15 +778,20 @@ function sessionCard(session, open) {
   const absent = (session.absent || []).map(studentName);
   const absentInc = session.absent?.length ? session.increments?.[session.absent[0]] : undefined;
   const count = session.order.length;
-  return `<details class="session" ${open ? "open" : ""}>
+  return `<details class="session${cancelled ? " is-cancelled" : ""}" ${open ? "open" : ""}>
     <summary>
       <span class="chev">${ICONS.chevron}</span>
       <span class="when">Очередь от ${esc(fmtDate(session.createdAt))}</span>
       <span class="muted small">${count} ${plural(count, "участник", "участника", "участников")}</span>
-      <span class="badge ${scored ? "" : "strong"}">${scored ? "Итоги подведены" : "Ожидает подведения итогов"}</span>
+      ${badge}
     </summary>
     <div class="body">
       ${session.createdBy ? `<p class="muted small" style="margin:0 0 10px">Составитель: ${esc(memberName(session.createdBy))}</p>` : ""}
+      ${
+        cancelled
+          ? `<p class="cancel-note">Очередь отменена${session.cancelledBy ? `: ${esc(memberName(session.cancelledBy))}` : ""}${session.cancelledAt ? `, ${esc(fmtDate(session.cancelledAt))}` : ""}. Начисления не производились.</p>`
+          : ""
+      }
       <div class="table history-table">
         <div class="trow thead"><span class="num">№</span><span>Участник</span><span class="num">Начислено</span></div>
         ${rows}
@@ -1028,12 +1041,12 @@ app.addEventListener("click", async (event) => {
       command({ type: "queue.created", pool: [...s.pool] }, "Очередь сформирована");
       break;
     case "undo": {
-      const last = s.history[0];
+      const last = lastActiveSession();
       const ok = await dialog({
         title: last.status === "awaiting" ? "Отменить очередь?" : "Отменить начисление?",
         body: `<p style="margin:0">${
           last.status === "awaiting"
-            ? "Участники будут возвращены в список сдающих, начисления не изменятся. Запись о формировании очереди сохранится в журнале."
+            ? "Участники будут возвращены в список сдающих, начисления не изменятся. Очередь останется в истории с отметкой «Отменена»."
             : "Начисленные значения будут вычтены, очередь вернётся в статус «Ожидает подведения итогов»."
         }</p>`,
         actions: [{ value: "ok", label: "Подтвердить отмену", kind: "danger" }],

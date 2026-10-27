@@ -250,6 +250,8 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color:
 
 .badge.strong { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 
+.badge.cancelled { background: var(--danger-bg); border-color: var(--danger); color: var(--danger); }
+
 .notice {
   display: flex;
   gap: 16px;
@@ -783,6 +785,12 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color:
 .session[open] summary .chev { transform: rotate(90deg); }
 
 .session .body { padding: 4px 16px 16px; }
+
+.session.is-cancelled summary .when { color: var(--muted); text-decoration: line-through; text-decoration-color: var(--danger); }
+
+.session.is-cancelled .history-table { opacity: 0.6; }
+
+.cancel-note { margin: 0 0 10px; font-size: 13px; color: var(--danger); }
 
 .access-line {
   display: flex;
