@@ -1,3 +1,5 @@
+import { HOME_SECTIONS, homeSectionsHtml, initHome } from "./home.js";
+
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
 
@@ -194,6 +196,7 @@ function copyFieldHtml(value) {
 let room = null;
 let pollTimer = 0;
 let justCreated = null;
+let homeCleanup = null;
 
 function navigate(path) {
   history.pushState(null, "", path);
@@ -203,6 +206,9 @@ function navigate(path) {
 function route() {
   clearInterval(pollTimer);
   room = null;
+  homeCleanup?.();
+  homeCleanup = null;
+  document.documentElement.classList.remove("paged");
   const match = location.pathname.match(/^\/r\/([A-Za-z0-9-]+)\/?$/);
   if (match) openRoom(match[1]);
   else renderHome();
@@ -226,69 +232,81 @@ document.addEventListener("visibilitychange", () => {
 
 function renderHome() {
   document.title = "zQueue — электронная очередь на сдачу работ";
-  const recent = storage.read(RECENT_KEY, []);
+  document.documentElement.classList.add("paged");
+  const recent = storage.read(RECENT_KEY, []).slice(0, 4);
+  const pages = [{ id: "hero", label: "Главная" }, ...HOME_SECTIONS];
   app.innerHTML = `
     <header class="topbar">
       <a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a>
       <button class="link-btn" type="button" data-home="create">Создать комнату</button>
     </header>
-    <main class="container home">
-      <section class="hero">
-        <div>
-          <h1>Электронная очередь<br />на сдачу работ</h1>
-          <p class="lead">
-            Сервис для формирования порядка сдачи лабораторных и практических работ.
-            Порядок определяется случайным образом с учётом накопленного приоритета.
-          </p>
-        </div>
-        <form id="join-form" class="card join">
-          <label class="field" for="code-input">Код комнаты</label>
-          <div class="join-row">
-            <input id="code-input" class="input code-input" placeholder="ABC123" maxlength="8"
-              autocomplete="off" autocapitalize="characters" spellcheck="false" required />
-            <button class="btn">Войти</button>
-          </div>
-          <p class="field-hint">Нет кода? <button class="link-btn" type="button" data-home="create">Создать комнату</button></p>
-        </form>
-      </section>
-
-      <section class="features">
-        <div class="feature">
-          <h3>Учёт ожидания</h3>
-          <p>Участники, сдававшие последними, получают приоритет в следующий раз.</p>
-        </div>
-        <div class="feature">
-          <h3>Отдельные комнаты</h3>
-          <p>Для каждой дисциплины ведётся своя очередь и история.</p>
-        </div>
-        <div class="feature">
-          <h3>Контроль доступа</h3>
-          <p>Изменения вносят только создатель и назначенные им редакторы.</p>
-        </div>
-      </section>
-
-      ${
-        recent.length
-          ? `<section>
-              <h2 class="section-title">Недавние комнаты</h2>
-              <div class="list">
-                ${recent
-                  .map(
-                    (r) => `<a class="list-row recent-item" href="/r/${esc(r.code)}" data-link>
-                      <span class="name">${esc(r.title || "Без названия")}</span>
-                      ${getToken(r.code) ? `<span class="badge">редактирование</span>` : ""}
-                      <span class="code">${esc(r.code)}</span>
-                    </a>`,
-                  )
-                  .join("")}
+    <nav class="page-dots" aria-label="Разделы страницы">
+      ${pages.map((p) => `<button type="button" data-dot="${p.id}" aria-label="${p.label}" title="${p.label}"></button>`).join("")}
+    </nav>
+    <main class="home">
+      <section class="page hero-page" id="hero" data-page>
+        <div class="page-inner">
+          <div class="hero">
+            <div class="reveal">
+              <h1>Электронная очередь<br />на сдачу работ</h1>
+              <p class="lead">
+                Сервис для формирования порядка сдачи лабораторных и практических работ.
+                Порядок определяется случайным образом с учётом накопленного приоритета.
+              </p>
+            </div>
+            <form id="join-form" class="card join reveal">
+              <label class="field" for="code-input">Код комнаты</label>
+              <div class="join-row">
+                <input id="code-input" class="input code-input" placeholder="ABC123" maxlength="8"
+                  autocomplete="off" autocapitalize="characters" spellcheck="false" required />
+                <button class="btn">Войти</button>
               </div>
-            </section>`
-          : ""
-      }
-    </main>
-    <footer class="footer">zQueue · Данные комнат хранятся на сервере, ключи доступа — только в вашем браузере.</footer>`;
+              <p class="field-hint">Нет кода? <button class="link-btn" type="button" data-home="create">Создать комнату</button></p>
+              ${
+                recent.length
+                  ? `<div class="recent">
+                      <span class="recent-title">Недавние комнаты</span>
+                      ${recent
+                        .map(
+                          (r) => `<a class="recent-item" href="/r/${esc(r.code)}" data-link>
+                            <span class="name">${esc(r.title || "Без названия")}</span>
+                            <span class="code">${esc(r.code)}</span>
+                          </a>`,
+                        )
+                        .join("")}
+                    </div>`
+                  : ""
+              }
+            </form>
+          </div>
+          <section class="features reveal">
+            <div class="feature">
+              <h3>Учёт ожидания</h3>
+              <p>Участники, сдававшие последними, получают приоритет в следующий раз.</p>
+            </div>
+            <div class="feature">
+              <h3>Отдельные комнаты</h3>
+              <p>Для каждой дисциплины ведётся своя очередь и история.</p>
+            </div>
+            <div class="feature">
+              <h3>Контроль доступа</h3>
+              <p>Изменения вносят только создатель и назначенные им редакторы.</p>
+            </div>
+          </section>
+        </div>
+        <button class="scroll-cue" type="button" data-dot="principle" aria-label="Подробнее">
+          <span>Подробнее</span>${ICONS.chevron}
+        </button>
+      </section>
+      ${homeSectionsHtml()}
+    </main>`;
 
   app.querySelectorAll("[data-home='create']").forEach((btn) => btn.addEventListener("click", createRoomDialog));
+  app.querySelector("[data-home='to-top']")?.addEventListener("click", () => {
+    document.getElementById("hero").scrollIntoView({ behavior: "smooth" });
+    setTimeout(() => document.getElementById("code-input")?.focus({ preventScroll: true }), 500);
+  });
+  homeCleanup = initHome(app);
 
   const input = document.getElementById("code-input");
   input.addEventListener("input", () => {
@@ -303,7 +321,7 @@ function renderHome() {
     }
     navigate(`/r/${code}`);
   });
-  if (!matchMedia("(max-width: 640px)").matches) input.focus();
+  if (!matchMedia("(max-width: 640px)").matches) input.focus({ preventScroll: true });
 }
 
 async function createRoomDialog() {
