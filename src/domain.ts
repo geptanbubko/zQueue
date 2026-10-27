@@ -191,15 +191,15 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
 
     case "member.revoked": {
       const member = state.members.find((m) => m.id === cmd.id);
-      if (!member || !member.active) fail("Такого редактора нет.");
-      if (member.role === "owner") fail("Создателя нельзя отключить.");
+      if (!member || !member.active) fail("Редактор не найден.");
+      if (member.role === "owner") fail("Доступ создателя не может быть отозван.");
       return { type: cmd.type, payload: { id: member.id, name: member.name } };
     }
 
     case "settings.changed": {
       const to: Settings = {
-        absenceScore: parseScore(cmd.absenceScore, "Не был в очереди"),
-        tailScore: parseScore(cmd.tailScore, "Не успел"),
+        absenceScore: parseScore(cmd.absenceScore, "Отсутствие в очереди"),
+        tailScore: parseScore(cmd.tailScore, "Работа не сдана"),
       };
       const from = state.settings;
       if (from.absenceScore === to.absenceScore && from.tailScore === to.tailScore) {
@@ -237,7 +237,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
 
     case "student.burdenSet": {
       const student = findStudent(state, cmd.id) ?? fail("Участник не найден.");
-      const to = parseScore(cmd.burden, "Задержка");
+      const to = parseScore(cmd.burden, "Приоритет");
       if (to === student.burden) fail("Значение не изменилось.");
       return { type: cmd.type, payload: { id: student.id, to } };
     }
@@ -247,7 +247,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       const inPool = new Set(state.pool);
       const added = [...new Set(idList(cmd.add))].filter((id) => known.has(id) && !inPool.has(id));
       const removed = [...new Set(idList(cmd.remove))].filter((id) => inPool.has(id));
-      if (added.length === 0 && removed.length === 0) fail("Пул не изменился.");
+      if (added.length === 0 && removed.length === 0) fail("Список сдающих не изменился.");
       return { type: cmd.type, payload: { added, removed } };
     }
 
@@ -255,8 +255,8 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       return { type: cmd.type, payload: { on: !state.urgentMode } };
 
     case "priority.set": {
-      if (!state.urgentMode) fail("Сначала включите режим горящих сроков.");
-      if (!state.pool.includes(cmd.id)) fail("Участник не в пуле.");
+      if (!state.urgentMode) fail("Включите приоритет по срокам.");
+      if (!state.pool.includes(cmd.id)) fail("Участник не отмечен как сдающий.");
       const to = cmd.level;
       if (to !== 1 && to !== 2 && to !== 3) fail("Неверный уровень.");
       if (priorityLevel(state, cmd.id) === to) fail("Уровень не изменился.");
@@ -265,12 +265,12 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
 
     case "queue.created": {
       const participants = poolStudents(state);
-      if (participants.length === 0) fail("Отметьте тех, кто сдаёт.");
+      if (participants.length === 0) fail("Отметьте участников, сдающих работы.");
       if (state.history.some((s) => s.status === "awaiting")) {
-        fail("Сначала начислите задержку за предыдущую очередь.");
+        fail("Подведите итоги предыдущей очереди.");
       }
       if (!sameMembers(idList(cmd.pool), state.pool)) {
-        fail("Пул только что изменили. Проверьте список и создайте очередь ещё раз.", 409);
+        fail("Список сдающих был изменён. Проверьте его и повторите действие.", 409);
       }
       const order = ([3, 2, 1] as const)
         .map((level) => participants.filter((s) => priorityLevel(state, s.id) === level))
@@ -281,7 +281,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
 
     case "session.tailMarked": {
       const session = state.history.find((s) => s.id === cmd.sessionId);
-      if (!session || session.status !== "awaiting") fail("Эта очередь уже закрыта.");
+      if (!session || session.status !== "awaiting") fail("Итоги этой очереди уже подведены.");
       const from = cmd.from ?? null;
       if (from !== null && !session.order.includes(from)) fail("Участник не из этой очереди.");
       if (from === session.unfinishedFrom) fail("Отметка не изменилась.");
@@ -290,7 +290,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
 
     case "session.scored": {
       const session = state.history.find((s) => s.id === cmd.sessionId);
-      if (!session || session.status !== "awaiting") fail("Эта очередь уже закрыта.");
+      if (!session || session.status !== "awaiting") fail("Итоги этой очереди уже подведены.");
       const order = session.order;
       const cutoff = session.unfinishedFrom ? order.indexOf(session.unfinishedFrom) : -1;
       const increments: Record<string, number> = {};
@@ -312,11 +312,11 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
     }
 
     case "session.undo": {
-      const last = state.history[0] ?? fail("Отменять нечего.");
+      const last = state.history[0] ?? fail("Нет действий для отмены.");
       if (last.status === "awaiting") {
         return { type: "session.cancelled", payload: { sessionId: last.id } };
       }
-      if (!last.increments) fail("Эту старую запись нельзя отменить.");
+      if (!last.increments) fail("Эту запись отменить невозможно.");
       return { type: "session.scoreReverted", payload: { sessionId: last.id } };
     }
 

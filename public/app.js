@@ -6,13 +6,10 @@ const RECENT_KEY = "queue.recent.v1";
 const POLL_MS = 5000;
 
 const ICONS = {
-  logo: `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="currentColor" style="color:var(--accent)"/><text x="16" y="21.5" text-anchor="middle" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="16" font-weight="800" letter-spacing="-0.5" fill="#fff">zQ</text></svg>`,
+  logo: `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" style="fill:var(--accent)"/><text x="16" y="21.5" text-anchor="middle" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="15" font-weight="700" letter-spacing="-0.5" style="fill:var(--accent-text)">zQ</text></svg>`,
   copy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
   check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`,
-  dice: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="8.5" cy="15.5" r="1.2" fill="currentColor"/></svg>`,
-  scale: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v18M5 21h14M7 7h10M7 7l-3 7a3 3 0 0 0 6 0zM17 7l-3 7a3 3 0 0 0 6 0z"/></svg>`,
-  log: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/></svg>`,
-  key: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 9.3-9.3M16 7l3 3M14 9l2 2"/></svg>`,
+  chevron: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16"><path d="m9 6 6 6-6 6"/></svg>`,
   more: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" width="18" height="18"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`,
 };
 
@@ -228,31 +225,45 @@ document.addEventListener("visibilitychange", () => {
 /* ---------- Стартовая страница ---------- */
 
 function renderHome() {
-  document.title = "zQueue — честная очередь на сдачу";
+  document.title = "zQueue — электронная очередь на сдачу работ";
   const recent = storage.read(RECENT_KEY, []);
   app.innerHTML = `
     <header class="topbar">
       <a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a>
+      <button class="link-btn" type="button" data-home="create">Создать комнату</button>
     </header>
     <main class="container home">
       <section class="hero">
         <div>
-          <h1>Честная очередь <span>на сдачу</span></h1>
+          <h1>Электронная очередь<br />на сдачу работ</h1>
           <p class="lead">
-            Порядок выбирается случайно, но тот, кто в прошлый раз стоял в конце или не успел,
-            в следующий раз чаще окажется впереди. Для каждого предмета — своя комната
-            с общей историей сдач.
+            Сервис для формирования порядка сдачи лабораторных и практических работ.
+            Порядок определяется случайным образом с учётом накопленного приоритета.
           </p>
         </div>
-        <div class="card join">
-          <form id="join-form" class="form-grid">
-            <h2>Войти в комнату</h2>
+        <form id="join-form" class="card join">
+          <label class="field" for="code-input">Код комнаты</label>
+          <div class="join-row">
             <input id="code-input" class="input code-input" placeholder="ABC123" maxlength="8"
-              autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Код комнаты" required />
-            <button class="btn">Открыть комнату</button>
-          </form>
-          <div class="divider">или</div>
-          <button class="btn ghost" id="create-btn" type="button">Создать новую комнату</button>
+              autocomplete="off" autocapitalize="characters" spellcheck="false" required />
+            <button class="btn">Войти</button>
+          </div>
+          <p class="field-hint">Нет кода? <button class="link-btn" type="button" data-home="create">Создать комнату</button></p>
+        </form>
+      </section>
+
+      <section class="features">
+        <div class="feature">
+          <h3>Учёт ожидания</h3>
+          <p>Участники, сдававшие последними, получают приоритет в следующий раз.</p>
+        </div>
+        <div class="feature">
+          <h3>Отдельные комнаты</h3>
+          <p>Для каждой дисциплины ведётся своя очередь и история.</p>
+        </div>
+        <div class="feature">
+          <h3>Контроль доступа</h3>
+          <p>Изменения вносят только создатель и назначенные им редакторы.</p>
         </div>
       </section>
 
@@ -260,12 +271,12 @@ function renderHome() {
         recent.length
           ? `<section>
               <h2 class="section-title">Недавние комнаты</h2>
-              <div class="recent">
+              <div class="list">
                 ${recent
                   .map(
-                    (r) => `<a class="recent-item" href="/r/${esc(r.code)}" data-link>
+                    (r) => `<a class="list-row recent-item" href="/r/${esc(r.code)}" data-link>
                       <span class="name">${esc(r.title || "Без названия")}</span>
-                      ${getToken(r.code) ? `<span class="badge editor">можно менять</span>` : ""}
+                      ${getToken(r.code) ? `<span class="badge">редактирование</span>` : ""}
                       <span class="code">${esc(r.code)}</span>
                     </a>`,
                   )
@@ -274,34 +285,10 @@ function renderHome() {
             </section>`
           : ""
       }
-
-      <section>
-        <h2 class="section-title">Как это устроено</h2>
-        <div class="features">
-          <div class="card feature">
-            <div class="ico">${ICONS.dice}</div>
-            <h3>Случайно, но с памятью</h3>
-            <p>У каждого есть накопленная задержка. Чем она больше, тем выше шанс оказаться в начале очереди.</p>
-          </div>
-          <div class="card feature">
-            <div class="ico">${ICONS.scale}</div>
-            <h3>Справедливое начисление</h3>
-            <p>Первый получает 0, последний — 1, кто не успел сдать — 1, кто не сдавал — 0,5. Значения можно настроить.</p>
-          </div>
-          <div class="card feature">
-            <div class="ico">${ICONS.log}</div>
-            <h3>Прозрачная история</h3>
-            <p>Видно, кто и когда составил каждую очередь и кто кому выдал доступ. Эти записи нельзя изменить или удалить.</p>
-          </div>
-          <div class="card feature">
-            <div class="ico">${ICONS.key}</div>
-            <h3>Без регистрации</h3>
-            <p>Смотреть может любой, у кого есть код. Менять — только создатель и те, кому он выдал ссылку-ключ.</p>
-          </div>
-        </div>
-      </section>
     </main>
-    <footer class="footer">zQueue · данные комнат хранятся на сервере, ключи — только в вашем браузере</footer>`;
+    <footer class="footer">zQueue · Данные комнат хранятся на сервере, ключи доступа — только в вашем браузере.</footer>`;
+
+  app.querySelectorAll("[data-home='create']").forEach((btn) => btn.addEventListener("click", createRoomDialog));
 
   const input = document.getElementById("code-input");
   input.addEventListener("input", () => {
@@ -311,22 +298,21 @@ function renderHome() {
     event.preventDefault();
     const code = normalizeCode(input.value);
     if (code.length !== 6) {
-      toast("Код состоит из 6 символов.", "error");
+      toast("Код комнаты состоит из 6 символов.", "error");
       return;
     }
     navigate(`/r/${code}`);
   });
-  document.getElementById("create-btn").addEventListener("click", createRoomDialog);
   if (!matchMedia("(max-width: 640px)").matches) input.focus();
 }
 
 async function createRoomDialog() {
   const values = await dialog({
-    title: "Новая комната",
-    body: `<p class="muted small" style="margin:0">Вы станете создателем: сможете менять очередь и выдавать доступ другим.</p>`,
+    title: "Создание комнаты",
+    body: `<p class="muted small" style="margin:0">Создатель комнаты управляет очередью и предоставляет доступ редакторам.</p>`,
     fields: [
-      { name: "title", label: "Предмет или название", placeholder: "Например, ОС — лабы, гр. 21-1", required: true },
-      { name: "name", label: "Ваше имя", placeholder: "Как вас показывать в истории", required: true },
+      { name: "title", label: "Дисциплина", placeholder: "Операционные системы, гр. 21-1", required: true },
+      { name: "name", label: "Ваше имя", placeholder: "Фамилия Имя", required: true },
     ],
     actions: [{ value: "ok", label: "Создать" }],
   });
@@ -365,7 +351,7 @@ async function openRoom(rawCode) {
   };
   justCreated = null;
   app.innerHTML = `<header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a></header>
-    <div class="loading">Загрузка комнаты ${esc(code)}…</div>`;
+    <div class="loading">Загрузка…</div>`;
   try {
     await refresh(true);
   } catch (err) {
@@ -393,8 +379,8 @@ function renderMissing(code) {
     <header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a></header>
     <main class="container">
       <div class="card" style="max-width:480px;margin:10vh auto;text-align:center">
-        <h2 style="margin-bottom:8px">Комната ${esc(code)} не найдена</h2>
-        <p class="muted">Проверьте код — он состоит из 6 латинских букв и цифр.</p>
+        <h2 style="margin-bottom:8px">Комната не найдена</h2>
+        <p class="muted">Комната с кодом <span class="mono">${esc(code)}</span> не существует. Проверьте правильность кода: 6 латинских букв и цифр.</p>
         <a class="btn" href="/" data-link>На главную</a>
       </div>
     </main>`;
@@ -544,25 +530,35 @@ function renderNotice() {
   if (room.notice === "created") {
     return `<div class="notice">
       <div class="grow">
-        <p><b>Комната создана.</b> Поделитесь кодом <b>${esc(room.code)}</b> — по нему очередь смогут смотреть все.</p>
-        <p class="small">Ваш доступ создателя хранится в этом браузере. Сохраните личную ссылку-ключ, чтобы войти с другого устройства. Никому её не передавайте.</p>
+        <p><b>Комната создана.</b> Код комнаты — <b class="mono">${esc(room.code)}</b>. Он необходим участникам для просмотра очереди.</p>
+        <p class="small muted">Права создателя сохранены в этом браузере. Для входа с другого устройства используйте персональную ссылку доступа. Не передавайте её другим лицам.</p>
         ${copyFieldHtml(ownKeyLink())}
       </div>
-      <button class="btn ghost sm" data-act="dismiss-notice">Готово</button>
+      <button class="btn ghost sm" data-act="dismiss-notice">Закрыть</button>
     </div>`;
   }
   if (room.notice === "key") {
-    return `<div class="notice"><div class="grow"><p><b>Ключ принят.</b> Теперь вы можете вносить изменения как ${esc(room.me?.name ?? "")}.</p></div>
-      <button class="btn ghost sm" data-act="dismiss-notice">Ок</button></div>`;
+    return `<div class="notice"><div class="grow"><p><b>Ссылка доступа принята.</b> Вы вошли как ${esc(room.me?.name ?? "")}.</p></div>
+      <button class="btn ghost sm" data-act="dismiss-notice">Закрыть</button></div>`;
   }
   if (room.notice === "bad-key") {
-    return `<div class="notice plain"><div class="grow"><p><b>Ключ не подошёл</b> — возможно, доступ отозвали. Комната открыта для просмотра.</p></div>
-      <button class="btn ghost sm" data-act="dismiss-notice">Ок</button></div>`;
+    return `<div class="notice"><div class="grow"><p><b>Ссылка доступа недействительна.</b> Возможно, доступ был отозван. Комната доступна только для просмотра.</p></div>
+      <button class="btn ghost sm" data-act="dismiss-notice">Закрыть</button></div>`;
   }
   if (!canEdit()) {
-    return `<div class="notice plain"><div class="grow"><p class="small">Вы смотрите комнату. Менять очередь могут только создатель и назначенные им редакторы — для этого нужна ссылка-ключ от создателя.</p></div></div>`;
+    return `<div class="notice"><p class="small">Режим просмотра. Вносить изменения могут создатель комнаты и назначенные им редакторы.</p></div>`;
   }
   return "";
+}
+
+function levelSwitchHtml(st, level, edit) {
+  return `<div class="level-switch" role="group" aria-label="Приоритет по срокам">
+    ${[3, 2, 1]
+      .map(
+        (l) => `<button class="l${l}" aria-pressed="${level === l}" ${edit ? `data-act="level" data-id="${st.id}" data-level="${l}"` : "disabled"}>${levelLabel(l)}</button>`,
+      )
+      .join("")}
+  </div>`;
 }
 
 function renderQueueTab() {
@@ -572,63 +568,60 @@ function renderQueueTab() {
   const poolSize = s.pool.length;
   const bandsUsed = new Set(s.pool.map((id) => levelOf(id))).size;
 
-  const people = [...s.students]
+  const rows = [...s.students]
     .sort((a, b) => a.name.localeCompare(b.name, "ru"))
     .map((st) => {
       const selected = s.pool.includes(st.id);
       const level = selected ? levelOf(st.id) : 1;
       const info = chances[st.id];
-      let chance = `<span class="chance muted">—</span>`;
+      let chance = `<span class="muted">—</span>`;
       if (info) {
-        const pct = `${(info.chance * 100).toFixed(1).replace(".", ",")}%`;
-        const prefix = s.urgentMode && bandsUsed > 1 ? (level === topLevel ? "" : `${levelLabel(level)} · `) : "";
-        chance = `<span class="chance" title="Шанс быть первым${prefix ? " внутри своего уровня" : ""}">${prefix}${pct}</span>`;
+        const pct = `${(info.chance * 100).toFixed(1).replace(".", ",")} %`;
+        const note = s.urgentMode && bandsUsed > 1 && level !== topLevel ? `<span class="muted small"> в группе</span>` : "";
+        chance = `${pct}${note}`;
       }
-      const levelSwitch =
-        s.urgentMode && selected
-          ? `<div class="level-switch" role="group" aria-label="Уровень срочности">
-              ${[3, 2, 1]
-                .map(
-                  (l) => `<button class="l${l}" aria-pressed="${level === l}" ${edit ? `data-act="level" data-id="${st.id}" data-level="${l}"` : "disabled"}
-                    title="${levelLabel(l)}">${l === 3 ? "выс" : l === 2 ? "сред" : "обыч"}</button>`,
-                )
-                .join("")}
-            </div>`
-          : "";
-      const rowClass = level === 3 ? "high" : level === 2 ? "mid" : selected ? "in-pool" : "";
       const toggle = edit
-        ? `<button class="check" role="checkbox" aria-checked="${selected}" aria-label="В пуле" data-act="pool-toggle" data-id="${st.id}">${selected ? ICONS.check : ""}</button>`
-        : `<span class="dot ${selected ? "on" : ""}" title="${selected ? "в пуле" : "не в пуле"}"></span>`;
-      return `<div class="person ${rowClass}">
-          ${toggle}
-          <div>
-            <div class="name">${esc(st.name)}</div>
-            <div class="meta">задержка ${fmtNum(st.burden)} · вес ${fmtNum(1 + st.burden)}</div>
-          </div>
-          <div class="side">
-            ${levelSwitch}
-            ${chance}
-            ${edit ? `<button class="btn subtle icon" data-act="student-menu" data-id="${st.id}" title="Действия">${ICONS.more}</button>` : ""}
-          </div>
-        </div>`;
+        ? `<button class="check" role="checkbox" aria-checked="${selected}" aria-label="Сдаёт" data-act="pool-toggle" data-id="${st.id}">${selected ? ICONS.check : ""}</button>`
+        : `<span class="dot ${selected ? "on" : ""}" title="${selected ? "сдаёт" : "не сдаёт"}"></span>`;
+      return `<div class="trow ${selected ? "selected" : ""}">
+        <span>${toggle}</span>
+        <span class="cell-name">
+          <span class="name">${esc(st.name)}</span>
+          <span class="meta-mobile">Приоритет: ${fmtNum(st.burden)}</span>
+          ${s.urgentMode && selected ? levelSwitchHtml(st, level, edit) : ""}
+        </span>
+        <span class="num col-prio" title="Вес ${fmtNum(1 + st.burden)}">${fmtNum(st.burden)}</span>
+        <span class="num">${chance}</span>
+        <span class="act">${edit ? `<button class="btn ghost icon" data-act="student-menu" data-id="${st.id}" aria-label="Действия">${ICONS.more}</button>` : ""}</span>
+      </div>`;
     })
     .join("");
 
   return `<div class="grid-2">
     <section class="card">
       <div class="card-head">
-        <h2>Участники <span class="muted small">· в пуле ${poolSize} из ${s.students.length}</span></h2>
+        <div>
+          <h2>Участники</h2>
+          <p class="muted small" style="margin:2px 0 0">Отмечено: ${poolSize} из ${s.students.length}</p>
+        </div>
         ${
           edit
             ? `<div class="btn-row">
-                <button class="btn subtle sm" data-act="pool-all" ${s.students.length && poolSize < s.students.length ? "" : "disabled"}>Все в пул</button>
-                <button class="btn subtle sm" data-act="pool-clear" ${poolSize ? "" : "disabled"}>Очистить пул</button>
+                <button class="btn ghost sm" data-act="pool-all" ${s.students.length && poolSize < s.students.length ? "" : "disabled"}>Отметить всех</button>
+                <button class="btn ghost sm" data-act="pool-clear" ${poolSize ? "" : "disabled"}>Снять отметки</button>
               </div>`
             : ""
         }
       </div>
-      ${s.students.length ? `<div class="people">${people}</div>` : `<div class="empty" style="margin-top:12px">Список пуст. ${edit ? "Добавьте участников во вкладке «Настройки»." : ""}</div>`}
-      <p class="hint">Отметьте тех, кто сдаёт сегодня. Вес = 1 + накопленная задержка, шанс считается только внутри пула.</p>
+      ${
+        s.students.length
+          ? `<div class="table roster">
+              <div class="trow thead"><span></span><span>ФИО</span><span class="num col-prio">Приоритет</span><span class="num">Вероятность</span><span></span></div>
+              ${rows}
+            </div>`
+          : `<div class="empty">Список участников пуст.${edit ? " Добавьте участников на вкладке «Настройки»." : ""}</div>`
+      }
+      <p class="hint">Отметьте участников, сдающих работы на текущем занятии. Вероятность — шанс оказаться первым в очереди; рассчитывается только среди отмеченных.</p>
     </section>
     <div class="stack sticky">
       ${renderDraw()}
@@ -646,33 +639,33 @@ function renderDraw() {
 
   let note;
   if (awaiting) {
-    note = "Очередь составлена. Когда станет ясно, кто успел сдать, отметьте это ниже и начислите задержку — после этого можно составлять следующую.";
+    note = "Очередь сформирована. По окончании занятия отметьте участников, не успевших сдать работу, и подведите итоги.";
   } else if (s.pool.length) {
-    note = `В очереди будет ${s.pool.length} ${plural(s.pool.length, "человек", "человека", "человек")}. Порядок выбирается сразу и окончательно.`;
+    note = `Будет сформирована очередь из ${s.pool.length} ${plural(s.pool.length, "участника", "участников", "участников")}. Порядок определяется однократно.`;
   } else {
-    note = "Отметьте участников, которые сдают сегодня.";
+    note = "Отметьте участников, сдающих работы на текущем занятии.";
   }
 
   return `<section class="card">
     <div class="card-head">
-      <h2>Жеребьёвка</h2>
-      <label class="switch" title="Горящие сроки: участники с высоким уровнем всегда идут раньше">
+      <h2>Формирование очереди</h2>
+      <label class="switch" title="Участники с более высоким уровнем всегда располагаются раньше">
         <input type="checkbox" data-act="urgent" ${s.urgentMode ? "checked" : ""} ${edit ? "" : "disabled"} />
-        <span class="track"></span><span class="small">Горящие сроки</span>
+        <span class="track"></span><span class="small">Приоритет по срокам</span>
       </label>
     </div>
-    ${
-      edit
-        ? `<div class="toolbar">
-            <button class="btn" data-act="create-queue" ${s.pool.length && !awaiting ? "" : "disabled"}>${ICONS.dice} Составить очередь</button>
-            <button class="btn danger" data-act="undo" ${last ? "" : "disabled"}>${undoLabel}</button>
-          </div>`
-        : ""
-    }
-    <p class="hint">${esc(note)}</p>
+    <p class="muted small" style="margin:0">${esc(note)}</p>
     ${
       s.urgentMode
-        ? `<div class="stat-row"><span>Высокий: <b>${s.pool.filter((id) => levelOf(id) === 3).length}</b> · средний: <b>${s.pool.filter((id) => levelOf(id) === 2).length}</b></span></div>`
+        ? `<p class="muted small" style="margin:8px 0 0">Высокий уровень: ${s.pool.filter((id) => levelOf(id) === 3).length} · средний: ${s.pool.filter((id) => levelOf(id) === 2).length}</p>`
+        : ""
+    }
+    ${
+      edit
+        ? `<div class="toolbar" style="margin-top:16px">
+            <button class="btn" data-act="create-queue" ${s.pool.length && !awaiting ? "" : "disabled"}>Сформировать очередь</button>
+            <button class="btn ghost" data-act="undo" ${last ? "" : "disabled"}>${undoLabel}</button>
+          </div>`
         : ""
     }
   </section>`;
@@ -682,28 +675,42 @@ function renderScoring() {
   const session = awaitingSession();
   if (!session) return "";
   const edit = canEdit();
+  const settings = room.state.settings;
   const cutoff = session.unfinishedFrom ? session.order.indexOf(session.unfinishedFrom) : -1;
-  const items = session.order
+  const rows = session.order
     .map((id, i) => {
       const tail = cutoff >= 0 && i >= cutoff;
       const atCutoff = i === cutoff;
-      return `<li class="${tail ? "tail" : ""}">
-        <span class="pos">${i + 1}</span>
-        <span class="name">${esc(studentName(id))}</span>
-        <span class="delta">+${fmtNum(delayFor(i, session.order.length, cutoff))}</span>
-        ${edit ? `<button class="btn ${atCutoff ? "danger" : "subtle"} sm" data-act="tail" data-session="${session.id}" data-id="${atCutoff ? "" : id}">${atCutoff ? "Снять" : "Не успели"}</button>` : ""}
-      </li>`;
+      return `<div class="trow ${tail ? "tail" : ""}">
+        <span class="num pos">${i + 1}</span>
+        <span class="cell-name"><span class="name">${esc(studentName(id))}</span></span>
+        <span class="num">+${fmtNum(delayFor(i, session.order.length, cutoff))}</span>
+        <span class="act">${
+          edit
+            ? `<button class="btn ${atCutoff ? "ghost" : "subtle"} sm" data-act="tail" data-session="${session.id}" data-id="${atCutoff ? "" : id}">${atCutoff ? "Снять" : "Не сдано"}</button>`
+            : ""
+        }</span>
+      </div>`;
     })
     .join("");
   return `<section class="card">
-    <div class="card-head"><h2>Текущая очередь</h2><span class="badge warn">ожидает начисления</span></div>
-    <p class="muted small" style="margin:0">${esc(fmtDate(session.createdAt, false))}${session.createdBy ? ` · составитель: ${esc(memberName(session.createdBy))}` : ""}. ${
+    <div class="card-head">
+      <div>
+        <h2>Текущая очередь</h2>
+        <p class="muted small" style="margin:2px 0 0">${esc(fmtDate(session.createdAt, false))}${session.createdBy ? ` · составитель: ${esc(memberName(session.createdBy))}` : ""}</p>
+      </div>
+      <span class="badge">Ожидает подведения итогов</span>
+    </div>
+    <div class="table order-table">
+      <div class="trow thead"><span class="num">№</span><span>Участник</span><span class="num">Начисление</span><span></span></div>
+      ${rows}
+    </div>
+    <p class="hint">${
       cutoff >= 0
-        ? `С ${cutoff + 1}-го места и до конца — не успели, им +${fmtNum(room.state.settings.tailScore)}.`
-        : "Отметьте первого, кто не успел сдать. Если успели все — начисляйте сразу."
-    } Кто не был в очереди, получит +${fmtNum(session.order.length > 1 ? room.state.settings.absenceScore : 0)}.</p>
-    <ol class="order">${items}</ol>
-    ${edit ? `<div class="toolbar" style="margin-top:14px"><button class="btn" data-act="score" data-session="${session.id}">Начислить задержку</button></div>` : ""}
+        ? `Участники начиная с ${cutoff + 1}-го места не успели сдать работу: начисление +${fmtNum(settings.tailScore)}.`
+        : "Отметьте первого участника, не успевшего сдать работу. Если работу сдали все, подведите итоги без отметки."
+    } Участникам, не включённым в очередь, начисляется +${fmtNum(session.order.length > 1 ? settings.absenceScore : 0)}.</p>
+    ${edit ? `<div class="toolbar" style="margin-top:16px"><button class="btn" data-act="score" data-session="${session.id}">Подвести итоги</button></div>` : ""}
   </section>`;
 }
 
@@ -713,37 +720,44 @@ function priorityLine(session) {
       const names = Object.entries(session.priority || {})
         .filter(([, v]) => v === level)
         .map(([id]) => studentName(id));
-      return names.length ? `${levelLabel(level)}: ${names.join(", ")}` : "";
+      return names.length ? `${levelLabel(level)} уровень — ${names.join(", ")}` : "";
     })
     .filter(Boolean);
-  return lines.length ? `<p class="hint">Горящие сроки. ${esc(lines.join(". "))}.</p>` : "";
+  return lines.length ? `<p class="hint">Приоритет по срокам: ${esc(lines.join("; "))}.</p>` : "";
 }
 
 function sessionCard(session, open) {
   const scored = session.status === "scored";
-  const items = session.order
+  const rows = session.order
     .map((id, i) => {
       const tail = session.unfinished?.includes(id);
       const inc = session.increments?.[id];
-      return `<li class="${tail ? "tail" : ""}"><span class="pos">${i + 1}</span><span class="name">${esc(studentName(id))}</span>
-        ${typeof inc === "number" ? `<span class="delta">+${fmtNum(inc)}</span>` : ""}</li>`;
+      return `<div class="trow ${tail ? "tail" : ""}">
+        <span class="num pos">${i + 1}</span>
+        <span class="cell-name"><span class="name">${esc(studentName(id))}</span></span>
+        <span class="num">${typeof inc === "number" ? `+${fmtNum(inc)}` : "—"}</span>
+      </div>`;
     })
     .join("");
   const absent = (session.absent || []).map(studentName);
   const absentInc = session.absent?.length ? session.increments?.[session.absent[0]] : undefined;
+  const count = session.order.length;
   return `<details class="session" ${open ? "open" : ""}>
     <summary>
-      <span class="chev">›</span>
-      <span class="when">Очередь · ${esc(fmtDate(session.createdAt))}</span>
-      <span class="badge">${session.order.length} чел.</span>
-      ${scored ? `<span class="badge editor">начислено</span>` : `<span class="badge warn">ожидает начисления</span>`}
+      <span class="chev">${ICONS.chevron}</span>
+      <span class="when">Очередь от ${esc(fmtDate(session.createdAt))}</span>
+      <span class="muted small">${count} ${plural(count, "участник", "участника", "участников")}</span>
+      <span class="badge ${scored ? "" : "strong"}">${scored ? "Итоги подведены" : "Ожидает подведения итогов"}</span>
     </summary>
     <div class="body">
       ${session.createdBy ? `<p class="muted small" style="margin:0 0 10px">Составитель: ${esc(memberName(session.createdBy))}</p>` : ""}
-      <ol class="order" style="margin-top:0">${items}</ol>
+      <div class="table history-table">
+        <div class="trow thead"><span class="num">№</span><span>Участник</span><span class="num">Начислено</span></div>
+        ${rows}
+      </div>
       ${priorityLine(session)}
-      ${session.unfinished?.length ? `<p class="hint">Не успели: ${esc(session.unfinished.map(studentName).join(", "))}.</p>` : ""}
-      ${absent.length ? `<p class="hint">Не сдавали: ${esc(absent.join(", "))}${typeof absentInc === "number" ? ` (+${fmtNum(absentInc)})` : ""}.</p>` : ""}
+      ${session.unfinished?.length ? `<p class="hint">Не сдали работу: ${esc(session.unfinished.map(studentName).join(", "))}.</p>` : ""}
+      ${absent.length ? `<p class="hint">Не участвовали в очереди: ${esc(absent.join(", "))}${typeof absentInc === "number" ? ` (начислено +${fmtNum(absentInc)})` : ""}.</p>` : ""}
     </div>
   </details>`;
 }
@@ -751,7 +765,7 @@ function sessionCard(session, open) {
 function accessLine(text, actorId, at) {
   return `<div class="access-line">
     <span class="what">${esc(text)}</span>
-    <span class="who">${actorId ? `${esc(memberName(actorId))} · ` : ""}${esc(fmtDate(at))}</span>
+    <span class="who">${actorId ? `Автор: ${esc(memberName(actorId))} · ` : ""}${esc(fmtDate(at))}</span>
   </div>`;
 }
 
@@ -760,22 +774,21 @@ function renderHistoryTab() {
   const items = s.history.map((session) => ({ at: session.createdAt || "", session }));
   for (const m of s.members) {
     if (m.role === "owner") {
-      items.push({ at: s.createdAt, html: accessLine(`Комната создана, создатель — ${m.name}`, null, s.createdAt) });
+      items.push({ at: s.createdAt, html: accessLine(`Комната создана. Создатель: ${m.name}`, null, s.createdAt) });
       continue;
     }
-    items.push({ at: m.addedAt, html: accessLine(`Выдан доступ редактора: ${m.name}`, m.addedBy, m.addedAt) });
+    items.push({ at: m.addedAt, html: accessLine(`Предоставлен доступ редактора: ${m.name}`, m.addedBy, m.addedAt) });
     if (!m.active && m.revokedAt) {
-      items.push({ at: m.revokedAt, html: accessLine(`Отозван доступ: ${m.name}`, m.revokedBy, m.revokedAt) });
+      items.push({ at: m.revokedAt, html: accessLine(`Доступ отозван: ${m.name}`, m.revokedBy, m.revokedAt) });
     }
   }
   items.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
   const firstSession = items.find((item) => item.session)?.session;
   return `<section class="history">
-    <p class="muted small" style="margin:0 0 14px">Здесь видно, кто составлял очереди и кто выдавал доступ. Эти записи хранятся в журнале, который нельзя изменить.</p>
+    <p class="muted small" style="margin:0 0 16px">Сведения о сформированных очередях и предоставлении доступа. Записи журнала не подлежат изменению.</p>
     ${items.map((item) => (item.session ? sessionCard(item.session, item.session === firstSession) : item.html)).join("")}
   </section>`;
 }
-
 
 /* ----- Настройки ----- */
 
@@ -785,11 +798,11 @@ function renderSettingsTab() {
   const owner = isOwner();
   const members = s.members
     .map(
-      (m) => `<li class="${m.active ? "" : "revoked"}">
-        <span class="name">${esc(m.name)}${room.me?.id === m.id ? ` <span class="muted small">(вы)</span>` : ""}</span>
-        <span class="badge ${m.active ? m.role : ""}">${m.role === "owner" ? "создатель" : m.active ? "редактор" : "отозван"}</span>
-        ${owner && m.role !== "owner" && m.active ? `<button class="btn danger sm" data-act="revoke" data-id="${m.id}">Отозвать</button>` : ""}
-      </li>`,
+      (m) => `<div class="trow ${m.active ? "" : "revoked"}">
+        <span class="cell-name"><span class="name">${esc(m.name)}${room.me?.id === m.id ? ` <span class="muted small">(вы)</span>` : ""}</span></span>
+        <span class="muted small">${m.role === "owner" ? "Создатель" : m.active ? "Редактор" : "Доступ отозван"}</span>
+        <span class="act">${owner && m.role !== "owner" && m.active ? `<button class="btn ghost sm" data-act="revoke" data-id="${m.id}">Отозвать</button>` : ""}</span>
+      </div>`,
     )
     .join("");
 
@@ -797,10 +810,10 @@ function renderSettingsTab() {
     ${
       edit
         ? `<section class="card">
-            <h2>Новый участник</h2>
-            <p class="muted small">Новичок получает задержку, равную медиане группы, чтобы не оказаться ни в начале, ни в конце. Переименовать или удалить участника можно кнопкой «⋯» во вкладке «Очередь».</p>
+            <h2>Добавление участника</h2>
+            <p class="muted small">Новому участнику присваивается приоритет, равный медиане по группе. Изменение и удаление участников доступно в списке на вкладке «Очередь».</p>
             <form class="inline-form" data-form="add-student">
-              <input id="new-student" class="input" placeholder="Имя участника" autocomplete="off" maxlength="120" required />
+              <input id="new-student" class="input" placeholder="Фамилия Имя Отчество" autocomplete="off" maxlength="120" required />
               <button class="btn">Добавить</button>
             </form>
           </section>`
@@ -809,12 +822,12 @@ function renderSettingsTab() {
 
     <section class="card">
       <h2>Параметры начисления</h2>
-      <p class="muted small">Место в очереди даёт от 0 (первый) до 1 (последний). Остальное настраивается здесь.</p>
+      <p class="muted small">За позицию в очереди начисляется от 0 (первое место) до 1 (последнее место). Значения ниже применяются при подведении итогов.</p>
       <form class="form-grid" data-form="settings">
-        <label class="field">Не был в очереди
+        <label class="field">Отсутствие в очереди
           <input id="set-absence" class="input" type="number" step="0.05" min="0" max="100" value="${s.settings.absenceScore}" ${edit ? "" : "disabled"} />
         </label>
-        <label class="field">Не успел сдать
+        <label class="field">Работа не сдана
           <input id="set-tail" class="input" type="number" step="0.05" min="0" max="100" value="${s.settings.tailScore}" ${edit ? "" : "disabled"} />
         </label>
         ${edit ? `<div><button class="btn">Сохранить</button></div>` : ""}
@@ -823,15 +836,15 @@ function renderSettingsTab() {
 
     <section class="card">
       <h2>Доступ</h2>
-      <p class="muted small">Смотреть комнату может любой по коду <b>${esc(room.code)}</b>. Менять — только люди из этого списка.</p>
-      <ul class="members">${members}</ul>
+      <p class="muted small">Просмотр комнаты доступен по коду <b class="mono">${esc(room.code)}</b>. Вносить изменения могут только перечисленные ниже лица.</p>
+      <div class="table members">${members}</div>
       ${
         owner
-          ? `<form class="inline-form" data-form="add-member">
+          ? `<form class="inline-form" data-form="add-member" style="margin-top:14px">
               <input id="new-member" class="input" placeholder="Имя редактора" maxlength="60" autocomplete="off" required />
-              <button class="btn">Выдать доступ</button>
+              <button class="btn">Предоставить доступ</button>
             </form>
-            <p class="hint">Человек получит личную ссылку-ключ. Отправьте её ему лично — по ней он сможет вносить изменения.</p>`
+            <p class="hint">Для редактора будет сформирована персональная ссылка доступа. Передайте её лично.</p>`
           : ""
       }
     </section>
@@ -844,12 +857,12 @@ function renderSettingsTab() {
               <label class="field">Название
                 <input id="room-title" class="input" value="${esc(s.title)}" maxlength="80" required />
               </label>
-              <div><button class="btn">Переименовать</button></div>
+              <div><button class="btn">Сохранить</button></div>
             </form>
             ${
               s.history.length === 0
-                ? `<h3>Перенос из старой версии</h3>
-                  <p class="muted small" style="margin-top:0">Загрузите queue-data.json — список группы, задержки и история перенесутся в комнату.</p>
+                ? `<h3>Перенос данных</h3>
+                  <p class="muted small" style="margin-top:0">Загрузите файл queue-data.json из предыдущей версии. Список участников и история будут перенесены в комнату.</p>
                   <label class="btn ghost">Выбрать файл<input type="file" accept="application/json,.json" data-act="import" hidden /></label>`
                 : ""
             }
@@ -858,13 +871,13 @@ function renderSettingsTab() {
     }
 
     <section class="card">
-      <h2>Это устройство</h2>
+      <h2>Текущее устройство</h2>
       ${
         edit
-          ? `<p class="muted small">Вы вошли как <b>${esc(room.me.name)}</b>. Ссылка ниже — ваш личный ключ: откройте её на другом устройстве, чтобы войти там. Не передавайте её никому.</p>
+          ? `<p class="muted small">Вы вошли как <b>${esc(room.me.name)}</b>. Персональная ссылка доступа позволяет войти с другого устройства. Не передавайте её другим лицам.</p>
             ${copyFieldHtml(ownKeyLink())}
-            <div class="toolbar" style="margin-top:14px"><button class="btn danger sm" data-act="forget-key">Выйти на этом устройстве</button></div>`
-          : `<p class="muted small">У вас нет доступа к изменениям. Если создатель выдал вам ссылку-ключ, просто откройте её.</p>`
+            <div class="toolbar" style="margin-top:14px"><button class="btn ghost sm" data-act="forget-key">Выйти на этом устройстве</button></div>`
+          : `<p class="muted small">Доступ к редактированию отсутствует. Для его получения обратитесь к создателю комнаты.</p>`
       }
     </section>
   </div>`;
@@ -877,11 +890,11 @@ async function studentMenu(id) {
   if (!st) return;
   const pick = await dialog({
     title: st.name,
-    body: `<p class="muted small" style="margin:0">Задержка ${fmtNum(st.burden)}.</p>`,
+    body: `<p class="muted small" style="margin:0">Приоритет: ${fmtNum(st.burden)}</p>`,
     actions: [
-      { value: "rename", label: "Переименовать", kind: "ghost" },
-      { value: "burden", label: "Изменить задержку", kind: "ghost" },
-      { value: "remove", label: "Удалить из списка", kind: "danger" },
+      { value: "rename", label: "Изменить ФИО", kind: "ghost" },
+      { value: "burden", label: "Изменить приоритет", kind: "ghost" },
+      { value: "remove", label: "Удалить участника", kind: "danger" },
       { value: "cancel", label: "Закрыть", kind: "subtle" },
     ],
     column: true,
@@ -889,23 +902,23 @@ async function studentMenu(id) {
   if (!pick) return;
   if (pick.action === "rename") {
     const v = await dialog({
-      title: "Переименовать",
-      fields: [{ name: "name", label: "Имя", value: st.name, required: true }],
+      title: "Изменение ФИО",
+      fields: [{ name: "name", label: "ФИО", value: st.name, required: true }],
     });
-    if (v) command({ type: "student.renamed", id, name: v.name }, "Имя изменено");
+    if (v) command({ type: "student.renamed", id, name: v.name }, "Изменения сохранены");
   } else if (pick.action === "burden") {
     const v = await dialog({
-      title: "Изменить задержку",
-      body: `<p class="muted small" style="margin:0">${esc(st.name)} · сейчас ${fmtNum(st.burden)}</p>`,
+      title: "Изменение приоритета",
+      body: `<p class="muted small" style="margin:0">${esc(st.name)} · текущее значение ${fmtNum(st.burden)}</p>`,
       fields: [
         { name: "burden", label: "Новое значение", type: "number", step: "0.01", min: 0, value: st.burden, required: true },
       ],
     });
-    if (v) command({ type: "student.burdenSet", id, burden: v.burden }, "Задержка изменена");
+    if (v) command({ type: "student.burdenSet", id, burden: v.burden }, "Изменения сохранены");
   } else if (pick.action === "remove") {
     const v = await dialog({
       title: "Удалить участника?",
-      body: `<p style="margin:0">${esc(st.name)} пропадёт из списка. В прошлых очередях имя останется.</p>`,
+      body: `<p style="margin:0">${esc(st.name)} будет удалён из списка. В истории прошлых очередей запись сохранится.</p>`,
       actions: [{ value: "ok", label: "Удалить", kind: "danger" }],
     });
     if (v) command({ type: "student.removed", id }, "Участник удалён");
@@ -917,9 +930,9 @@ async function addMember(name) {
   if (!data?.token) return;
   const link = `${location.origin}/r/${room.code}#key=${encodeURIComponent(data.token)}`;
   await dialog({
-    title: `Ссылка для ${data.event.payload.name}`,
-    body: `<p class="muted small" style="margin:0">Отправьте ссылку этому человеку лично. Она показывается один раз — если потеряется, отзовите доступ и выдайте новый.</p>${copyFieldHtml(link)}`,
-    actions: [{ value: "ok", label: "Готово" }],
+    title: `Ссылка доступа: ${data.change.payload.name}`,
+    body: `<p class="muted small" style="margin:0">Передайте ссылку лично. Она отображается однократно; при утере отзовите доступ и предоставьте его повторно.</p>${copyFieldHtml(link)}`,
+    actions: [{ value: "ok", label: "Закрыть" }],
     column: true,
   });
 }
@@ -934,9 +947,9 @@ async function importFile(file) {
   }
   const count = Array.isArray(data?.students) ? data.students.length : 0;
   const ok = await dialog({
-    title: "Импортировать данные?",
-    body: `<p style="margin:0">Список участников (${count}) и история заменят текущие.</p>`,
-    actions: [{ value: "ok", label: "Импортировать" }],
+    title: "Перенести данные?",
+    body: `<p style="margin:0">Текущий список участников и история будут заменены данными из файла (участников: ${count}).</p>`,
+    actions: [{ value: "ok", label: "Перенести" }],
   });
   if (ok) command({ type: "room.imported", data }, "Данные перенесены");
 }
@@ -984,7 +997,7 @@ app.addEventListener("click", async (event) => {
       studentMenu(id);
       break;
     case "create-queue":
-      command({ type: "queue.created", pool: [...s.pool] }, "Очередь составлена");
+      command({ type: "queue.created", pool: [...s.pool] }, "Очередь сформирована");
       break;
     case "undo": {
       const last = s.history[0];
@@ -992,25 +1005,25 @@ app.addEventListener("click", async (event) => {
         title: last.status === "awaiting" ? "Отменить очередь?" : "Отменить начисление?",
         body: `<p style="margin:0">${
           last.status === "awaiting"
-            ? "Участники вернутся в пул, задержка не изменится. Запись о том, кто составлял очередь, останется в журнале."
-            : "Начисленная задержка будет вычтена, очередь снова будет ждать начисления."
+            ? "Участники будут возвращены в список сдающих, начисления не изменятся. Запись о формировании очереди сохранится в журнале."
+            : "Начисленные значения будут вычтены, очередь вернётся в статус «Ожидает подведения итогов»."
         }</p>`,
-        actions: [{ value: "ok", label: "Отменить", kind: "danger" }],
+        actions: [{ value: "ok", label: "Подтвердить отмену", kind: "danger" }],
       });
-      if (ok) command({ type: "session.undo" }, "Отменено");
+      if (ok) command({ type: "session.undo" }, "Действие отменено");
       break;
     }
     case "tail":
       command({ type: "session.tailMarked", sessionId: el.getAttribute("data-session"), from: id || null });
       break;
     case "score":
-      command({ type: "session.scored", sessionId: el.getAttribute("data-session") }, "Задержка начислена");
+      command({ type: "session.scored", sessionId: el.getAttribute("data-session") }, "Итоги подведены");
       break;
     case "revoke": {
       const m = s.members.find((x) => x.id === id);
       const ok = await dialog({
         title: "Отозвать доступ?",
-        body: `<p style="margin:0">${esc(m?.name)} больше не сможет вносить изменения. Запись о выдаче доступа останется в истории.</p>`,
+        body: `<p style="margin:0">${esc(m?.name)} не сможет вносить изменения. Запись о предоставлении доступа сохранится.</p>`,
         actions: [{ value: "ok", label: "Отозвать", kind: "danger" }],
       });
       if (ok) command({ type: "member.revoked", id }, "Доступ отозван");
@@ -1019,7 +1032,7 @@ app.addEventListener("click", async (event) => {
     case "forget-key": {
       const ok = await dialog({
         title: "Выйти на этом устройстве?",
-        body: `<p style="margin:0">Ключ будет удалён из браузера. ${isOwner() ? "Если у вас нет сохранённой ссылки-ключа, доступ создателя будет потерян навсегда." : "Вернуться можно по ссылке-ключу."}</p>`,
+        body: `<p style="margin:0">Ссылка доступа будет удалена из браузера. ${isOwner() ? "Без сохранённой ссылки права создателя восстановить невозможно." : "Повторный вход возможен по той же ссылке."}</p>`,
         actions: [{ value: "ok", label: "Выйти", kind: "danger" }],
       });
       if (ok) {
@@ -1073,7 +1086,7 @@ app.addEventListener("submit", async (event) => {
       "Параметры сохранены",
     );
   } else if (kind === "rename") {
-    command({ type: "room.renamed", title: document.getElementById("room-title").value }, "Название изменено");
+    command({ type: "room.renamed", title: document.getElementById("room-title").value }, "Изменения сохранены");
   }
 });
 
