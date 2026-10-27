@@ -250,6 +250,7 @@ function renderHome() {
         <button class="link-btn" type="button" data-home="create">Создать комнату</button>
       </div>
     </header>
+    <button class="to-top is-hidden" type="button" aria-label="В начало страницы" title="В начало страницы">${ICONS.chevron}</button>
     <nav class="page-dots" aria-label="Разделы страницы">
       ${pages.map((p) => `<button type="button" data-dot="${p.id}" aria-label="${p.label}" title="${p.label}"></button>`).join("")}
     </nav>

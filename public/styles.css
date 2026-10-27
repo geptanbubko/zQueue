@@ -539,6 +539,31 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color:
 
 .page-dots button[aria-current="true"] { height: 22px; background: var(--text); border-color: var(--text); }
 
+.to-top {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  transition: opacity 0.25s ease, transform 0.25s ease, background 0.15s ease;
+}
+
+.to-top:hover { background: var(--hover); }
+
+.to-top svg { width: 18px; height: 18px; transform: rotate(-90deg); }
+
+.to-top.is-hidden { opacity: 0; transform: translateY(12px); pointer-events: none; }
+
 .scroll-cue {
   position: absolute;
   bottom: 20px;
@@ -588,6 +613,7 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color:
 @media (max-width: 640px) {
   .page-inner { padding: 72px 16px 48px; }
   .home-topbar .brand span { display: none; }
+  .to-top { right: 16px; bottom: 16px; }
   .join-inline.compact .code-input { width: 120px; }
   .start-actions > div, .join-inline.wide { width: 100%; }
   .or-sep { flex-direction: row; }

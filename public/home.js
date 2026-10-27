@@ -276,6 +276,13 @@ function createPager(pages) {
 
   const goTo = (page) => scrollToIndex(pages.indexOf(page));
 
+  // Мгновенный переход без анимации.
+  function jumpToTop() {
+    cancelAnimationFrame(frame);
+    animating = false;
+    scrollTo({ top: 0, behavior: "instant" });
+  }
+
   // size — сила события колеса; для клавиш Infinity. Возвращает true, если событие обработано.
   function step(dir, size) {
     const now = performance.now();
@@ -317,6 +324,7 @@ function createPager(pages) {
   addEventListener("keydown", onKey);
   return {
     goTo,
+    jumpToTop,
     destroy() {
       cancelAnimationFrame(frame);
       removeEventListener("wheel", onWheel);
@@ -332,10 +340,12 @@ export function initHome(root) {
   const pager = createPager(pages);
 
   const topbar = root.querySelector(".home-topbar");
+  const toTop = root.querySelector(".to-top");
   const setActive = (id) => {
     for (const dot of dots) dot.setAttribute("aria-current", dot.dataset.dot === id ? "true" : "false");
     // На первом разделе панель скрыта: там уже есть логотип и поле для кода.
     topbar?.classList.toggle("is-hidden", id === "hero");
+    toTop?.classList.toggle("is-hidden", id === "hero");
     if (id === "hero" && topbar?.contains(document.activeElement)) document.activeElement.blur();
   };
 
@@ -360,6 +370,11 @@ export function initHome(root) {
   pages.forEach((page) => {
     reveal.observe(page);
     active.observe(page);
+  });
+
+  toTop?.addEventListener("click", () => {
+    pager.jumpToTop();
+    toTop.blur();
   });
 
   for (const link of root.querySelectorAll("[data-dot]")) {
