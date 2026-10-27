@@ -301,7 +301,7 @@ function renderHome() {
 
   app.querySelectorAll("[data-home='create']").forEach((btn) => btn.addEventListener("click", createRoomDialog));
   app.querySelector("[data-home='to-top']")?.addEventListener("click", () => {
-    setTimeout(() => document.getElementById("code-input")?.focus({ preventScroll: true }), 950);
+    setTimeout(() => document.getElementById("code-input")?.focus({ preventScroll: true }), 750);
   });
   homeCleanup = initHome(app);
 

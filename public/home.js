@@ -205,10 +205,10 @@ function simulateFirstPlaces(runs) {
 }
 
 const HEADER = 56;
-const DURATION = 900;
-// Сколько ждать после последнего события колеса, прежде чем принять следующее:
-// поглощает инерционную прокрутку тачпада.
-const QUIET = 220;
+const DURATION = 700;
+// Событие колеса, пришедшее раньше этого интервала после предыдущего и не сильнее
+// его, считается хвостом инерции тачпада того же жеста, а не новым жестом.
+const INERTIA_GAP = 70;
 const PAGED = "(min-width: 900px) and (min-height: 600px) and (hover: hover)";
 
 function easeInOutCubic(t) {
@@ -217,14 +217,17 @@ function easeInOutCubic(t) {
 
 /**
  * Постраничная прокрутка: колесо и клавиши переводят к соседнему разделу
- * плавной анимацией. Внутри раздела выше экрана прокрутка остаётся обычной.
+ * плавной анимацией. Смена направления срабатывает сразу, даже во время
+ * анимации. Внутри раздела выше экрана прокрутка остаётся обычной.
  */
 function createPager(pages) {
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const paged = matchMedia(PAGED);
   let frame = 0;
-  let busyUntil = 0;
   let animating = false;
+  let from = 0;
+  let to = 0;
+  let last = { dir: 0, time: 0, size: 0 };
 
   const topOf = (page) => page.getBoundingClientRect().top + scrollY - HEADER;
 
@@ -236,9 +239,13 @@ function createPager(pages) {
     return index;
   };
 
-  function scrollToY(y) {
+  function scrollToIndex(index) {
+    const page = pages[index];
+    if (!page) return;
+    from = animating ? to : currentIndex();
+    to = index;
     const max = document.documentElement.scrollHeight - innerHeight;
-    const target = Math.max(0, Math.min(max, Math.round(y)));
+    const target = Math.max(0, Math.min(max, Math.round(topOf(page))));
     cancelAnimationFrame(frame);
     if (reduced.matches) {
       scrollTo(0, target);
@@ -246,34 +253,38 @@ function createPager(pages) {
     }
     const start = scrollY;
     const distance = target - start;
+    // Короткий путь (например, при развороте) проходим быстрее.
+    const duration = DURATION * Math.min(1, Math.max(0.45, Math.abs(distance) / innerHeight));
     const t0 = performance.now();
     animating = true;
-    const step = (now) => {
-      const p = Math.min(1, (now - t0) / DURATION);
+    const tick = (now) => {
+      const p = Math.min(1, (now - t0) / duration);
       scrollTo(0, start + distance * easeInOutCubic(p));
-      if (p < 1) {
-        frame = requestAnimationFrame(step);
-      } else {
-        animating = false;
-        busyUntil = performance.now() + QUIET;
-      }
+      if (p < 1) frame = requestAnimationFrame(tick);
+      else animating = false;
     };
-    frame = requestAnimationFrame(step);
+    frame = requestAnimationFrame(tick);
   }
 
-  const goTo = (page) => page && scrollToY(topOf(page));
+  const goTo = (page) => scrollToIndex(pages.indexOf(page));
 
-  // Возвращает true, если событие обработано постраничной прокруткой.
-  function step(dir) {
+  // size — сила события колеса; для клавиш Infinity. Возвращает true, если событие обработано.
+  function step(dir, size) {
+    const now = performance.now();
+    const inertia = dir === last.dir && now - last.time < INERTIA_GAP && size <= last.size * 1.1;
+    last = { dir, time: now, size };
+
+    if (animating) {
+      // Разворот во время анимации — сразу обратно.
+      if (dir !== Math.sign(to - from)) scrollToIndex(from);
+      return true;
+    }
     const page = pages[currentIndex()];
     const rect = page.getBoundingClientRect();
     // Раздел выше экрана: сначала докручиваем его до края обычной прокруткой.
     if (dir > 0 && rect.bottom > innerHeight + 2) return false;
     if (dir < 0 && rect.top < HEADER - 2) return false;
-    const now = performance.now();
-    const blocked = animating || now < busyUntil;
-    busyUntil = Math.max(busyUntil, now + QUIET);
-    if (!blocked) goTo(pages[currentIndex() + dir]);
+    if (!inertia) scrollToIndex(currentIndex() + dir);
     return true;
   }
 
@@ -281,7 +292,7 @@ function createPager(pages) {
     if (!paged.matches || event.ctrlKey || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
     if (event.target.closest?.("dialog")) return;
     const dir = Math.sign(event.deltaY);
-    if (dir && step(dir)) event.preventDefault();
+    if (dir && step(dir, Math.abs(event.deltaY))) event.preventDefault();
   }
 
   const KEYS = { ArrowDown: 1, PageDown: 1, ArrowUp: -1, PageUp: -1 };
@@ -291,7 +302,7 @@ function createPager(pages) {
     if (event.target.closest?.("input, textarea, select, button, dialog, [contenteditable]")) return;
     let dir = KEYS[event.key];
     if (event.key === " ") dir = event.shiftKey ? -1 : 1;
-    if (dir && step(dir)) event.preventDefault();
+    if (dir && step(dir, Infinity)) event.preventDefault();
   }
 
   addEventListener("wheel", onWheel, { passive: false });
