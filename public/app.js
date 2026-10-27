@@ -246,6 +246,7 @@ function renderHome() {
       <a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a>
       <div class="topbar-actions">
         ${joinFormHtml("code-input-top", "compact")}
+        <span class="v-sep" aria-hidden="true"></span>
         <button class="link-btn" type="button" data-home="create">Создать комнату</button>
       </div>
     </header>

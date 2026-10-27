@@ -183,6 +183,7 @@ export function homeSectionsHtml(joinForm) {
             <span class="start-label">Вход в комнату</span>
             ${joinForm}
           </div>
+          <div class="or-sep" aria-hidden="true"><span>или</span></div>
           <div>
             <span class="start-label">Новая комната</span>
             <button class="btn ghost" type="button" data-home="create">Создать комнату</button>
