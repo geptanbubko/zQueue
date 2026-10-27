@@ -276,12 +276,6 @@ label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color:
 
 /* ---------- Стартовая страница ---------- */
 
-html.paged { scroll-snap-type: y mandatory; scroll-padding-top: 56px; scroll-behavior: smooth; }
-
-@media (max-width: 900px), (max-height: 640px) {
-  html.paged { scroll-snap-type: y proximity; }
-}
-
 .home { display: block; }
 
 .page {
@@ -290,7 +284,6 @@ html.paged { scroll-snap-type: y mandatory; scroll-padding-top: 56px; scroll-beh
   flex-direction: column;
   min-height: calc(100vh - 56px);
   min-height: calc(100dvh - 56px);
-  scroll-snap-align: start;
   border-bottom: 1px solid var(--border);
 }
 
@@ -540,7 +533,6 @@ html.paged { scroll-snap-type: y mandatory; scroll-padding-top: 56px; scroll-beh
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html.paged { scroll-behavior: auto; }
   .reveal, .band-items i { opacity: 1; transform: none; transition: none; }
   .bar-fill { transition: none; }
   .scroll-cue svg { animation: none; }

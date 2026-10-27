@@ -180,7 +180,7 @@ export function homeSectionsHtml() {
         </ol>
         <div class="toolbar reveal" style="margin-top:28px">
           <button class="btn" type="button" data-home="create">Создать комнату</button>
-          <button class="btn ghost" type="button" data-home="to-top">Ввести код комнаты</button>
+          <button class="btn ghost" type="button" data-home="to-top" data-dot="hero">Ввести код комнаты</button>
         </div>
       </div>
       <footer class="footer">zQueue · Данные комнат хранятся на сервере, ключи доступа — только в вашем браузере.</footer>
@@ -204,10 +204,113 @@ function simulateFirstPlaces(runs) {
   return counts.map((c) => c / runs);
 }
 
-/** Подключает навигацию точками, появление блоков и моделирование. Возвращает функцию очистки. */
+const HEADER = 56;
+const DURATION = 900;
+// Сколько ждать после последнего события колеса, прежде чем принять следующее:
+// поглощает инерционную прокрутку тачпада.
+const QUIET = 220;
+const PAGED = "(min-width: 900px) and (min-height: 600px) and (hover: hover)";
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+}
+
+/**
+ * Постраничная прокрутка: колесо и клавиши переводят к соседнему разделу
+ * плавной анимацией. Внутри раздела выше экрана прокрутка остаётся обычной.
+ */
+function createPager(pages) {
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+  const paged = matchMedia(PAGED);
+  let frame = 0;
+  let busyUntil = 0;
+  let animating = false;
+
+  const topOf = (page) => page.getBoundingClientRect().top + scrollY - HEADER;
+
+  const currentIndex = () => {
+    let index = 0;
+    pages.forEach((page, i) => {
+      if (topOf(page) <= scrollY + 4) index = i;
+    });
+    return index;
+  };
+
+  function scrollToY(y) {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    const target = Math.max(0, Math.min(max, Math.round(y)));
+    cancelAnimationFrame(frame);
+    if (reduced.matches) {
+      scrollTo(0, target);
+      return;
+    }
+    const start = scrollY;
+    const distance = target - start;
+    const t0 = performance.now();
+    animating = true;
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / DURATION);
+      scrollTo(0, start + distance * easeInOutCubic(p));
+      if (p < 1) {
+        frame = requestAnimationFrame(step);
+      } else {
+        animating = false;
+        busyUntil = performance.now() + QUIET;
+      }
+    };
+    frame = requestAnimationFrame(step);
+  }
+
+  const goTo = (page) => page && scrollToY(topOf(page));
+
+  // Возвращает true, если событие обработано постраничной прокруткой.
+  function step(dir) {
+    const page = pages[currentIndex()];
+    const rect = page.getBoundingClientRect();
+    // Раздел выше экрана: сначала докручиваем его до края обычной прокруткой.
+    if (dir > 0 && rect.bottom > innerHeight + 2) return false;
+    if (dir < 0 && rect.top < HEADER - 2) return false;
+    const now = performance.now();
+    const blocked = animating || now < busyUntil;
+    busyUntil = Math.max(busyUntil, now + QUIET);
+    if (!blocked) goTo(pages[currentIndex() + dir]);
+    return true;
+  }
+
+  function onWheel(event) {
+    if (!paged.matches || event.ctrlKey || Math.abs(event.deltaY) < Math.abs(event.deltaX)) return;
+    if (event.target.closest?.("dialog")) return;
+    const dir = Math.sign(event.deltaY);
+    if (dir && step(dir)) event.preventDefault();
+  }
+
+  const KEYS = { ArrowDown: 1, PageDown: 1, ArrowUp: -1, PageUp: -1 };
+
+  function onKey(event) {
+    if (!paged.matches || event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.target.closest?.("input, textarea, select, button, dialog, [contenteditable]")) return;
+    let dir = KEYS[event.key];
+    if (event.key === " ") dir = event.shiftKey ? -1 : 1;
+    if (dir && step(dir)) event.preventDefault();
+  }
+
+  addEventListener("wheel", onWheel, { passive: false });
+  addEventListener("keydown", onKey);
+  return {
+    goTo,
+    destroy() {
+      cancelAnimationFrame(frame);
+      removeEventListener("wheel", onWheel);
+      removeEventListener("keydown", onKey);
+    },
+  };
+}
+
+/** Подключает постраничную прокрутку, навигацию точками, появление блоков и моделирование. Возвращает функцию очистки. */
 export function initHome(root) {
   const pages = [...root.querySelectorAll("[data-page]")];
-  const dots = [...root.querySelectorAll("[data-dot]")];
+  const dots = [...root.querySelectorAll(".page-dots [data-dot]")];
+  const pager = createPager(pages);
 
   const setActive = (id) => {
     for (const dot of dots) dot.setAttribute("aria-current", dot.dataset.dot === id ? "true" : "false");
@@ -236,8 +339,8 @@ export function initHome(root) {
     active.observe(page);
   });
 
-  for (const dot of dots) {
-    dot.addEventListener("click", () => document.getElementById(dot.dataset.dot)?.scrollIntoView({ behavior: "smooth" }));
+  for (const link of root.querySelectorAll("[data-dot]")) {
+    link.addEventListener("click", () => pager.goTo(document.getElementById(link.dataset.dot)));
   }
 
   root.querySelector("[data-simulate]")?.addEventListener("click", (event) => {
@@ -254,5 +357,6 @@ export function initHome(root) {
   return () => {
     reveal.disconnect();
     active.disconnect();
+    pager.destroy();
   };
 }

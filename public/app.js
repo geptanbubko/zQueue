@@ -208,7 +208,6 @@ function route() {
   room = null;
   homeCleanup?.();
   homeCleanup = null;
-  document.documentElement.classList.remove("paged");
   const match = location.pathname.match(/^\/r\/([A-Za-z0-9-]+)\/?$/);
   if (match) openRoom(match[1]);
   else renderHome();
@@ -232,7 +231,6 @@ document.addEventListener("visibilitychange", () => {
 
 function renderHome() {
   document.title = "zQueue — электронная очередь на сдачу работ";
-  document.documentElement.classList.add("paged");
   const recent = storage.read(RECENT_KEY, []).slice(0, 4);
   const pages = [{ id: "hero", label: "Главная" }, ...HOME_SECTIONS];
   app.innerHTML = `
@@ -303,8 +301,7 @@ function renderHome() {
 
   app.querySelectorAll("[data-home='create']").forEach((btn) => btn.addEventListener("click", createRoomDialog));
   app.querySelector("[data-home='to-top']")?.addEventListener("click", () => {
-    document.getElementById("hero").scrollIntoView({ behavior: "smooth" });
-    setTimeout(() => document.getElementById("code-input")?.focus({ preventScroll: true }), 500);
+    setTimeout(() => document.getElementById("code-input")?.focus({ preventScroll: true }), 950);
   });
   homeCleanup = initHome(app);
 
