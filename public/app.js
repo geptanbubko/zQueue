@@ -229,14 +229,25 @@ document.addEventListener("visibilitychange", () => {
 
 /* ---------- Стартовая страница ---------- */
 
+function joinFormHtml(id, variant) {
+  return `<form class="join-inline ${variant}" data-join>
+    <input id="${id}" class="input code-input" placeholder="Код комнаты" maxlength="8" aria-label="Код комнаты"
+      autocomplete="off" autocapitalize="characters" spellcheck="false" required />
+    <button class="btn">Войти</button>
+  </form>`;
+}
+
 function renderHome() {
   document.title = "zQueue — электронная очередь на сдачу работ";
   const recent = storage.read(RECENT_KEY, []).slice(0, 4);
   const pages = [{ id: "hero", label: "Главная" }, ...HOME_SECTIONS];
   app.innerHTML = `
-    <header class="topbar">
+    <header class="topbar home-topbar is-hidden">
       <a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a>
-      <button class="link-btn" type="button" data-home="create">Создать комнату</button>
+      <div class="topbar-actions">
+        ${joinFormHtml("code-input-top", "compact")}
+        <button class="link-btn" type="button" data-home="create">Создать комнату</button>
+      </div>
     </header>
     <nav class="page-dots" aria-label="Разделы страницы">
       ${pages.map((p) => `<button type="button" data-dot="${p.id}" aria-label="${p.label}" title="${p.label}"></button>`).join("")}
@@ -246,19 +257,19 @@ function renderHome() {
         <div class="page-inner">
           <div class="hero">
             <div class="reveal">
-              <h1>Электронная очередь<br />на сдачу работ</h1>
+              <h1 class="hero-brand">${ICONS.logo}<span>zQueue</span></h1>
               <p class="lead">
                 Сервис для формирования порядка сдачи лабораторных и практических работ.
                 Порядок определяется случайным образом с учётом накопленного приоритета.
               </p>
             </div>
-            <form id="join-form" class="card join reveal">
+            <div class="card join reveal">
               <label class="field" for="code-input">Код комнаты</label>
-              <div class="join-row">
+              <form class="join-row" data-join>
                 <input id="code-input" class="input code-input" placeholder="ABC123" maxlength="8"
                   autocomplete="off" autocapitalize="characters" spellcheck="false" required />
                 <button class="btn">Войти</button>
-              </div>
+              </form>
               <p class="field-hint">Нет кода? <button class="link-btn" type="button" data-home="create">Создать комнату</button></p>
               ${
                 recent.length
@@ -275,7 +286,7 @@ function renderHome() {
                     </div>`
                   : ""
               }
-            </form>
+            </div>
           </div>
           <section class="features reveal">
             <div class="feature">
@@ -296,29 +307,28 @@ function renderHome() {
           <span>Подробнее</span>${ICONS.chevron}
         </button>
       </section>
-      ${homeSectionsHtml()}
+      ${homeSectionsHtml(joinFormHtml("code-input-bottom", "wide"))}
     </main>`;
 
   app.querySelectorAll("[data-home='create']").forEach((btn) => btn.addEventListener("click", createRoomDialog));
-  app.querySelector("[data-home='to-top']")?.addEventListener("click", () => {
-    setTimeout(() => document.getElementById("code-input")?.focus({ preventScroll: true }), 750);
-  });
   homeCleanup = initHome(app);
 
-  const input = document.getElementById("code-input");
-  input.addEventListener("input", () => {
-    input.value = normalizeCode(input.value).slice(0, 6);
+  app.querySelectorAll("[data-join]").forEach((form) => {
+    const input = form.querySelector("input");
+    input.addEventListener("input", () => {
+      input.value = normalizeCode(input.value).slice(0, 6);
+    });
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const code = normalizeCode(input.value);
+      if (code.length !== 6) {
+        toast("Код комнаты состоит из 6 символов.", "error");
+        return;
+      }
+      navigate(`/r/${code}`);
+    });
   });
-  document.getElementById("join-form").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const code = normalizeCode(input.value);
-    if (code.length !== 6) {
-      toast("Код комнаты состоит из 6 символов.", "error");
-      return;
-    }
-    navigate(`/r/${code}`);
-  });
-  if (!matchMedia("(max-width: 640px)").matches) input.focus({ preventScroll: true });
+  if (!matchMedia("(max-width: 640px)").matches) document.getElementById("code-input").focus({ preventScroll: true });
 }
 
 async function createRoomDialog() {

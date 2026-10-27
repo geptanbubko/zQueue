@@ -42,7 +42,7 @@ function sectionHead(index, title, lead) {
   </div>`;
 }
 
-export function homeSectionsHtml() {
+export function homeSectionsHtml(joinForm) {
   const exampleRows = EXAMPLE.map((p) => {
     const weight = 1 + p.burden;
     const share = weight / totalWeight;
@@ -178,9 +178,15 @@ export function homeSectionsHtml() {
           <li><b>Добавьте участников</b><span>Внесите список группы на вкладке «Настройки» или перенесите данные из файла.</span></li>
           <li><b>Передайте код</b><span>По коду из шести символов участники смогут просматривать очередь.</span></li>
         </ol>
-        <div class="toolbar reveal" style="margin-top:28px">
-          <button class="btn" type="button" data-home="create">Создать комнату</button>
-          <button class="btn ghost" type="button" data-home="to-top" data-dot="hero">Ввести код комнаты</button>
+        <div class="start-actions reveal">
+          <div>
+            <span class="start-label">Вход в комнату</span>
+            ${joinForm}
+          </div>
+          <div>
+            <span class="start-label">Новая комната</span>
+            <button class="btn ghost" type="button" data-home="create">Создать комнату</button>
+          </div>
         </div>
       </div>
       <footer class="footer">zQueue · Данные комнат хранятся на сервере, ключи доступа — только в вашем браузере.</footer>
@@ -204,7 +210,8 @@ function simulateFirstPlaces(runs) {
   return counts.map((c) => c / runs);
 }
 
-const HEADER = 56;
+// Верхняя панель стартовой страницы закреплена поверх разделов и не занимает места.
+const HEADER = 0;
 const DURATION = 700;
 // Событие колеса, пришедшее раньше этого интервала после предыдущего и не сильнее
 // его, считается хвостом инерции тачпада того же жеста, а не новым жестом.
@@ -323,8 +330,12 @@ export function initHome(root) {
   const dots = [...root.querySelectorAll(".page-dots [data-dot]")];
   const pager = createPager(pages);
 
+  const topbar = root.querySelector(".home-topbar");
   const setActive = (id) => {
     for (const dot of dots) dot.setAttribute("aria-current", dot.dataset.dot === id ? "true" : "false");
+    // На первом разделе панель скрыта: там уже есть логотип и поле для кода.
+    topbar?.classList.toggle("is-hidden", id === "hero");
+    if (id === "hero" && topbar?.contains(document.activeElement)) document.activeElement.blur();
   };
 
   // Блоки раздела проявляются, как только раздел показался на экране.
