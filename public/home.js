@@ -214,6 +214,8 @@ function simulateFirstPlaces(runs) {
 // Верхняя панель стартовой страницы закреплена поверх разделов и не занимает места.
 const HEADER = 0;
 const DURATION = 700;
+// Возврат в начало с любого раздела.
+const TOP_DURATION = 800;
 // Событие колеса, пришедшее раньше этого интервала после предыдущего и не сильнее
 // его, считается хвостом инерции тачпада того же жеста, а не новым жестом.
 const INERTIA_GAP = 70;
@@ -247,7 +249,7 @@ function createPager(pages) {
     return index;
   };
 
-  function scrollToIndex(index) {
+  function scrollToIndex(index, fixedDuration) {
     const page = pages[index];
     if (!page) return;
     from = animating ? to : currentIndex();
@@ -262,7 +264,7 @@ function createPager(pages) {
     const start = scrollY;
     const distance = target - start;
     // Короткий путь (например, при развороте) проходим быстрее.
-    const duration = DURATION * Math.min(1, Math.max(0.45, Math.abs(distance) / innerHeight));
+    const duration = fixedDuration ?? DURATION * Math.min(1, Math.max(0.45, Math.abs(distance) / innerHeight));
     const t0 = performance.now();
     animating = true;
     const tick = (now) => {
@@ -276,12 +278,8 @@ function createPager(pages) {
 
   const goTo = (page) => scrollToIndex(pages.indexOf(page));
 
-  // Мгновенный переход без анимации.
-  function jumpToTop() {
-    cancelAnimationFrame(frame);
-    animating = false;
-    scrollTo({ top: 0, behavior: "instant" });
-  }
+  // Возврат в начало: одна анимация фиксированной длины, сколько бы разделов ни было пройдено.
+  const jumpToTop = () => scrollToIndex(0, TOP_DURATION);
 
   // size — сила события колеса; для клавиш Infinity. Возвращает true, если событие обработано.
   function step(dir, size) {
