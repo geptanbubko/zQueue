@@ -225,7 +225,7 @@ export function parseSettings(raw: any, fallback: Settings = DEFAULT_SETTINGS): 
   if (!DRAW_MODES.includes(drawMode as DrawMode)) fail("Неизвестный способ жеребьёвки.");
   return {
     absenceScore: parseScore(pick("absenceScore"), "Отсутствие в очереди"),
-    tailScore: parseScore(pick("tailScore"), "Работа не сдана"),
+    tailScore: parseScore(pick("tailScore"), "Не успел сдать"),
     drawMode: drawMode as DrawMode,
     beta: parseRange(pick("beta"), "Сила компенсации β", 0, 10),
     sigma: parseRange(pick("sigma"), "Разброс σ", 0.01, 10),

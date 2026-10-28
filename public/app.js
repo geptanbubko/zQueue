@@ -1145,7 +1145,7 @@ function eventText(e) {
     case "settings.changed": {
       const part = (label, key) =>
         p.from && p.from[key] === p.to[key] ? "" : `${label} ${p.from ? `${fmtNum(p.from[key])} → ` : ""}${fmtNum(p.to[key])}`;
-      const scoring = [part("отсутствие в очереди", "absenceScore"), part("работа не сдана", "tailScore")].filter(Boolean);
+      const scoring = [part("отсутствие в очереди", "absenceScore"), part("не успел сдать", "tailScore")].filter(Boolean);
       // Записи до появления выбора жеребьёвки не содержат её параметров.
       const draw =
         p.to.drawMode === undefined
@@ -1573,7 +1573,7 @@ const SLIDERS = {
   },
   tailScore: {
     name: "tailScore",
-    label: "Работа не сдана",
+    label: "Не успел сдать",
     help: "Начисляется тем, кто не успел сдать работу. За позицию в очереди начисляется от 0 (первое место) до 1 (последнее), поэтому 1 — как за последнее место.",
     min: 0.5, max: 2, step: 0.25, fallback: 1, left: "меньше", right: "больше",
   },
