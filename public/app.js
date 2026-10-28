@@ -8,6 +8,8 @@ const toastEl = document.getElementById("toast");
 const TOKENS_KEY = "queue.tokens.v1";
 const RECENT_KEY = "queue.recent.v1";
 const POLL_MS = 5000;
+/** Гость скрыл плашку «Режим просмотра» — больше не показываем в этом браузере. */
+const VIEW_NOTICE_KEY = "queue.viewNoticeHidden.v1";
 
 const ICONS = {
   logo: `<svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" style="fill:var(--accent)"/><text x="16" y="21.5" text-anchor="middle" font-family="Segoe UI, Inter, system-ui, sans-serif" font-size="15" font-weight="700" letter-spacing="-0.5" style="fill:var(--accent-text)">zQ</text></svg>`,
@@ -15,6 +17,8 @@ const ICONS = {
   check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`,
   chevron: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16"><path d="m9 6 6 6-6 6"/></svg>`,
   share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="15" height="15"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/></svg>`,
+  close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" width="16" height="16"><path d="M18 6 6 18M6 6l12 12"/></svg>`,
+  undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="15" height="15"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>`,
   more: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" width="18" height="18"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`,
 };
 
@@ -86,6 +90,15 @@ function fmtDate(iso, withYear = true) {
       hour: "2-digit",
       minute: "2-digit",
     });
+  } catch {
+    return iso;
+  }
+}
+
+/** Дата без времени: «28 октября». */
+function fmtDay(iso) {
+  try {
+    return new Date(iso).toLocaleDateString("ru-RU", { day: "numeric", month: "long" });
   } catch {
     return iso;
   }
@@ -526,21 +539,40 @@ const DRAW_MODES = [
     value: "relative",
     label: "По разнице приоритетов (рекомендовано)",
     hint: "Жеребьёвка, в которой шансы тем выше, чем дольше участник ждал раньше. Важна только разница приоритетов, поэтому преимущество не ослабевает к концу семестра. Сила компенсации задаёт, насколько велико это преимущество.",
+    details: [
+      "Вес участника w = e^(β·p), где p — накопленный приоритет, β — сила компенсации.",
+      "Порядок тянется как лотерея без возвращения: первым становится участник с вероятностью w / Σw, затем так же среди оставшихся.",
+      "Важна только разница приоритетов: при разнице Δp шансы отличаются в e^(β·Δp) раз (при β = 2,5 и Δp = 1 — примерно в 12 раз). Поэтому преимущество не ослабевает со временем.",
+    ],
   },
   {
     value: "debt",
     label: "Упорядочивание по приоритету",
     hint: "Участники выстраиваются по убыванию приоритета, а случайный разброс перемешивает тех, у кого он близок. Чем меньше разброс, тем строже порядок.",
+    details: [
+      "Ключ участника k = p + σ·ε, где p — накопленный приоритет, σ — случайный разброс, ε — случайное число из стандартного нормального распределения.",
+      "Очередь — участники по убыванию ключа.",
+      "Участник с приоритетом на Δp больше окажется раньше с вероятностью Φ(Δp / (σ·√2)): при σ = 0,35 и Δp = 1 — около 98 %, при Δp = 0,2 — около 66 %.",
+    ],
   },
   {
     value: "random",
     label: "Полностью случайно",
     hint: "У всех равные шансы, приоритет на порядок не влияет (но продолжает начисляться).",
+    details: [
+      "Все порядки равновероятны: каждый участник оказывается на любом месте с вероятностью 1/n.",
+      "Приоритет на порядок не влияет, но продолжает начисляться — он пригодится, если позже выбрать другой способ.",
+    ],
   },
   {
     value: "legacy",
-    label: "Прежняя формула",
+    label: "Legacy формула",
     hint: "Вероятность пропорциональна 1 + p. Преимущество небольшое и уменьшается по мере накопления приоритета у всех участников.",
+    details: [
+      "Вес участника w = 1 + p, порядок тянется как лотерея без возвращения: первым — с вероятностью w / Σw, затем так же среди оставшихся.",
+      "Важна абсолютная величина приоритета: когда он вырастет у всех, относительная разница весов уменьшится и преимущество ослабнет (веса 1 и 2 отличаются вдвое, а 6 и 7 — лишь на 17 %).",
+      "Способ сохранён для комнат, созданных до появления выбора.",
+    ],
   },
 ];
 
@@ -773,8 +805,9 @@ function renderNotice() {
     return `<div class="notice"><div class="grow"><p><b>Ссылка доступа недействительна.</b> Возможно, доступ был отозван. Комната доступна только для просмотра.</p></div>
       <button class="btn ghost sm" data-act="dismiss-notice">Закрыть</button></div>`;
   }
-  if (!canEdit()) {
-    return `<div class="notice"><p class="small">Режим просмотра. Вносить изменения могут создатель комнаты и назначенные им редакторы.</p></div>`;
+  if (!canEdit() && !storage.read(VIEW_NOTICE_KEY, false)) {
+    return `<div class="notice"><p class="small grow">Режим просмотра. Вносить изменения могут создатель комнаты и назначенные им редакторы.</p>
+      <button class="btn ghost icon" data-act="dismiss-view-notice" aria-label="Скрыть" title="Скрыть">${ICONS.close}</button></div>`;
   }
   return "";
 }
@@ -828,7 +861,7 @@ function renderQueueTab() {
     })
     .join("");
 
-  return `<div class="grid-2">
+  return `<div class="${edit ? "grid-2" : ""}">
     <section class="card">
       <div class="card-head">
         <div>
@@ -852,11 +885,9 @@ function renderQueueTab() {
             </div>`
           : `<div class="empty">Список участников пуст.${edit ? " Добавьте участников на вкладке «Настройки»." : ""}</div>`
       }
-      <p class="hint">Отметьте участников, сдающих работы на текущем занятии. Шанс быть первым рассчитывается среди отмеченных, а если никто не отмечен — среди всей группы.</p>
+      <p class="hint">Отметьте участников, сдающих работы на текущем занятии.</p>
     </section>
-    <div class="stack sticky">
-      ${renderDraw()}
-    </div>
+    ${edit ? `<div class="stack sticky">${renderDraw()}</div>` : ""}
   </div>
   ${renderPlaces()}`;
 }
@@ -868,7 +899,7 @@ function renderDraw() {
 
   let note;
   if (s.pool.length) {
-    note = `Будет сформирована очередь из ${s.pool.length} ${plural(s.pool.length, "участника", "участников", "участников")}. Порядок определяется однократно.`;
+    note = `Будет сформирована очередь из ${s.pool.length} ${plural(s.pool.length, "участника", "участников", "участников")}.`;
   } else {
     note = "Отметьте участников, сдающих работы на текущем занятии.";
   }
@@ -891,7 +922,11 @@ function renderDraw() {
       edit
         ? `<div class="toolbar" style="margin-top:16px">
             <button class="btn" data-act="create-queue" ${s.pool.length ? "" : "disabled"}>Сформировать очередь</button>
-            ${last ? `<button class="btn ghost" data-act="undo">Отменить начисление</button>` : ""}
+            ${
+              last
+                ? `<button class="btn ghost" data-act="undo" title="Вычесть начисления и вернуть очередь к подведению итогов">${ICONS.undo}Отменить итоги очереди от ${esc(fmtDay(last.createdAt))}</button>`
+                : ""
+            }
           </div>`
         : ""
     }
@@ -1056,8 +1091,8 @@ function sessionCard(session, open) {
   </details>`;
 }
 
-function logLine(text, actorId, at) {
-  return `<div class="access-line">
+function logLine(text, actorId, at, important = false) {
+  return `<div class="access-line ${important ? "is-important" : ""}">
     <span class="what">${esc(text)}</span>
     <span class="who">${actorId ? `Автор: ${esc(memberName(actorId))} · ` : ""}${esc(fmtDate(at))}</span>
   </div>`;
@@ -1173,15 +1208,20 @@ function renderHistoryTab() {
     for (const e of room.journal.events) {
       const text = eventText(e);
       const actor = e.type === "room.created" ? null : e.actorId;
-      if (text) items.push({ at: e.createdAt, order: e.seq, html: logLine(text, actor, e.createdAt) });
+      // Ручное изменение приоритета влияет на порядок в обход жеребьёвки — выделяем.
+      const important = e.type === "student.burdenSet";
+      if (text) items.push({ at: e.createdAt, order: e.seq, html: logLine(text, actor, e.createdAt, important) });
     }
   } else {
     items.push(...snapshotItems());
   }
   items.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : b.order - a.order));
   const firstSession = items.find((item) => item.session)?.session;
-  return `<section class="history">
-    <p class="muted small" style="margin:0 0 16px">Журнал всех действий, влияющих на порядок очереди и начисления: состав группы, ручные изменения приоритета, параметры, очереди и их итоги, доступ. Записи журнала не подлежат изменению.</p>
+  return `<div class="history-head">
+    <h2>Журнал</h2>
+    <p class="muted small">Все действия, влияющие на порядок очереди и начисления: состав группы, ручные изменения приоритета, параметры, очереди и их итоги, доступ. Записи журнала невозможно изменить.</p>
+  </div>
+  <section class="history">
     ${items.map((item) => (item.session ? sessionCard(item.session, item.session === firstSession) : item.html)).join("")}
   </section>`;
 }
@@ -1478,18 +1518,21 @@ function splitNew(names, current = []) {
 
 /**
  * Все параметры комнаты: способ жеребьёвки с его параметром и начисления.
- * Подсказка и нужный параметр переключаются обработчиком change на документе.
+ * Нужный параметр показывается обработчиком change на документе.
  */
 function settingsFieldsHtml(settings, disabled = false) {
   const off = disabled ? "disabled" : "";
   const current = DRAW_MODES.find((m) => m.value === settings.drawMode) ?? DRAW_MODES[0];
   return `<div class="form-grid" data-draw>
-    <div class="field">
-      <span class="field-label">Способ жеребьёвки ${helpHtml(current.hint, "data-draw-hint")}</span>
-      <select class="input" name="drawMode" data-draw-mode aria-label="Способ жеребьёвки" ${off}>
-        ${DRAW_MODES.map((m) => `<option value="${m.value}" ${m.value === current.value ? "selected" : ""}>${esc(m.label)}</option>`).join("")}
-      </select>
-    </div>
+    <fieldset class="field draw-modes">
+      <legend class="field-label">Способ жеребьёвки</legend>
+      ${DRAW_MODES.map(
+        (m) => `<label class="draw-mode">
+          <input type="radio" name="drawMode" value="${m.value}" data-draw-mode ${m.value === current.value ? "checked" : ""} ${off} />
+          <span><b>${esc(m.label)} ${helpHtml(m.details.join("\n\n"))}</b><span>${esc(m.hint)}</span></span>
+        </label>`,
+      ).join("")}
+    </fieldset>
     ${sliderHtml({ ...SLIDERS.beta, mode: "relative", value: settings.beta, hidden: current.value !== "relative", off })}
     ${sliderHtml({ ...SLIDERS.sigma, mode: "debt", value: settings.sigma, hidden: current.value !== "debt", off })}
     ${sliderHtml({ ...SLIDERS.absenceScore, value: settings.absenceScore, off })}
@@ -1556,15 +1599,16 @@ document.addEventListener("input", (event) => {
   if (slider) slider.closest(".field").querySelector("[data-slider-value]").textContent = fmtNum(Number(slider.value));
 });
 
+// «?» внутри варианта жеребьёвки только показывает подсказку и не выбирает вариант.
+document.addEventListener("click", (event) => {
+  if (event.target.closest?.(".draw-mode .help")) event.preventDefault();
+});
+
 document.addEventListener("change", (event) => {
-  const select = event.target.closest?.("[data-draw-mode]");
-  if (!select) return;
-  const box = select.closest("[data-draw]");
-  const hint = DRAW_MODES.find((m) => m.value === select.value)?.hint ?? "";
-  const help = box.querySelector("[data-draw-hint]");
-  help.dataset.tip = hint;
-  help.setAttribute("aria-label", hint);
-  for (const el of box.querySelectorAll("[data-draw-param]")) el.hidden = el.dataset.drawParam !== select.value;
+  const radio = event.target.closest?.("[data-draw-mode]");
+  if (!radio) return;
+  const box = radio.closest("[data-draw]");
+  for (const el of box.querySelectorAll("[data-draw-param]")) el.hidden = el.dataset.drawParam !== radio.value;
 });
 
 function bulkFieldHtml(label) {
@@ -1671,6 +1715,10 @@ app.addEventListener("click", async (event) => {
       room.notice = null;
       renderRoom();
       break;
+    case "dismiss-view-notice":
+      storage.write(VIEW_NOTICE_KEY, true);
+      renderRoom();
+      break;
     case "pool-toggle":
       command(s.pool.includes(id) ? { type: "pool.changed", remove: [id] } : { type: "pool.changed", add: [id] });
       break;
@@ -1694,11 +1742,11 @@ app.addEventListener("click", async (event) => {
     case "undo": {
       const last = lastActiveSession();
       const ok = await dialog({
-        title: last.status === "awaiting" ? "Отменить очередь?" : "Отменить начисление?",
+        title: last.status === "awaiting" ? "Отменить очередь?" : `Отменить итоги очереди от ${fmtDay(last.createdAt)}?`,
         body: `<p style="margin:0">${
           last.status === "awaiting"
             ? "Участники будут возвращены в список сдающих, начисления не изменятся. Очередь останется в истории с отметкой «Отменена»."
-            : "Начисленные значения будут вычтены, очередь вернётся в статус «Ожидает подведения итогов»."
+            : "Начисления за эту очередь будут вычтены, и она снова будет ждать подведения итогов: можно заново отметить, кто не успел."
         }</p>`,
         actions: [{ value: "ok", label: "Подтвердить отмену", kind: "danger" }],
       });
