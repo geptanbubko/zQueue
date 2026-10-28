@@ -8,6 +8,7 @@
   --muted: #737373;
   --faint: #a3a3a3;
   --border: #e5e5e5;
+  --card-border: #dcdcdc;
   --divider: #f0f0f0;
   --accent: #0a0a0a;
   --accent-hover: #262626;
@@ -32,6 +33,7 @@
     --muted: #8f8f8f;
     --faint: #5c5c5c;
     --border: #262626;
+    --card-border: #333333;
     --divider: #1c1c1c;
     --accent: #ededed;
     --accent-hover: #d4d4d4;
@@ -137,7 +139,7 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 
 .card {
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 1px solid var(--card-border);
   border-radius: var(--radius);
   padding: 20px;
 }
@@ -904,7 +906,9 @@ div.field { position: relative; }
 
 /* Настройки */
 
-.settings-grid { display: grid; gap: 20px; align-items: start; }
+.settings-grid { display: grid; gap: 24px; align-items: start; }
+
+.settings-grid > .stack { gap: 24px; }
 
 @media (min-width: 900px) {
   .settings-grid { grid-template-columns: 1fr 1fr; }

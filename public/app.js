@@ -1124,7 +1124,18 @@ function renderSettingsTab() {
     )
     .join("");
 
+  // Две независимые колонки: высокая карточка параметров не растягивает соседние.
   return `<div class="settings-grid">
+    <div class="stack">
+    <section class="card">
+      <h2>Параметры очереди</h2>
+      <p class="muted small">Как накопленный приоритет влияет на порядок и сколько начисляется по итогам занятия.</p>
+      <form class="form-grid" data-form="settings">
+        ${settingsFieldsHtml(s.settings, !edit)}
+        ${edit ? `<div><button class="btn">Сохранить</button></div>` : ""}
+      </form>
+    </section>
+
     ${
       edit
         ? `<section class="card">
@@ -1140,16 +1151,9 @@ function renderSettingsTab() {
           </section>`
         : ""
     }
+    </div>
 
-    <section class="card">
-      <h2>Параметры очереди</h2>
-      <p class="muted small">Как накопленный приоритет влияет на порядок и сколько начисляется по итогам занятия.</p>
-      <form class="form-grid" data-form="settings">
-        ${settingsFieldsHtml(s.settings, !edit)}
-        ${edit ? `<div><button class="btn">Сохранить</button></div>` : ""}
-      </form>
-    </section>
-
+    <div class="stack">
     <section class="card">
       <h2>Доступ</h2>
       <p class="muted small">Просмотр комнаты доступен по коду <b class="mono">${esc(room.code)}</b>. Вносить изменения могут только перечисленные ниже лица.</p>
@@ -1202,6 +1206,7 @@ function renderSettingsTab() {
           : `<p class="muted small">Доступ к редактированию отсутствует. Для его получения обратитесь к создателю комнаты.</p>`
       }
     </section>
+    </div>
   </div>`;
 }
 
