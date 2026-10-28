@@ -611,7 +611,53 @@ div.field { position: relative; }
 
 .start-label { display: block; margin-bottom: 8px; font-size: 12px; color: var(--muted); }
 
-.footer { padding: 24px 16px; border-top: 1px solid var(--border); text-align: center; color: var(--muted); font-size: 12.5px; }
+/* Плашка внизу страниц комнаты: прижата к низу экрана, даже если содержимого мало. */
+#app:has(> .site-footer) { display: flex; flex-direction: column; min-height: 100vh; }
+
+.site-footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+}
+
+.site-footer-brand { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
+
+.site-footer-brand svg { width: 18px; height: 18px; }
+
+.site-footer .sep { width: 1px; height: 14px; background: var(--border); }
+
+.site-footer-credit b {
+  font-weight: 600;
+  background: linear-gradient(90deg, var(--text), var(--muted));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* На стартовой плашка закреплена внизу экрана и появляется со второго слайда. */
+.home-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: blur(8px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.home-footer.is-hidden { opacity: 0; transform: translateY(100%); pointer-events: none; }
+
+.home .page:last-child { padding-bottom: 56px; }
+
+#app:has(.home-footer:not(.is-hidden)) .to-top { bottom: 72px; }
 
 /* Навигация и анимации */
 
@@ -773,7 +819,25 @@ div.field { position: relative; }
 
 .order-table .trow { grid-template-columns: 20px minmax(0, 1fr) 72px auto; }
 
+/* Поделиться картинкой */
+
+.share-preview {
+  display: block;
+  width: 100%;
+  max-height: 55vh;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #0a0a0a;
+}
+
+.share-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
 /* Подведение итогов */
+
+.guest-queue .trow { grid-template-columns: 28px minmax(0, 1fr); padding-top: 10px; padding-bottom: 10px; }
+
+.guest-queue .name { font-size: 15px; }
 
 .result-table .trow { grid-template-columns: 24px minmax(0, 1fr) 72px 112px; }
 

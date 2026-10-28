@@ -194,7 +194,6 @@ export function homeSectionsHtml(joinForm) {
           </div>
         </div>
       </div>
-      <footer class="footer">zQueue · Данные комнат хранятся на сервере, ключи доступа — только в вашем браузере.</footer>
     </section>`;
 }
 
@@ -343,11 +342,13 @@ export function initHome(root) {
 
   const topbar = root.querySelector(".home-topbar");
   const toTop = root.querySelector(".to-top");
+  const footer = root.querySelector(".home-footer");
   const setActive = (id) => {
     for (const dot of dots) dot.setAttribute("aria-current", dot.dataset.dot === id ? "true" : "false");
     // На первом разделе панель скрыта: там уже есть логотип и поле для кода.
     topbar?.classList.toggle("is-hidden", id === "hero");
     toTop?.classList.toggle("is-hidden", id === "hero");
+    footer?.classList.toggle("is-hidden", id === "hero");
     if (id === "hero" && topbar?.contains(document.activeElement)) document.activeElement.blur();
   };
 

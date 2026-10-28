@@ -1,5 +1,6 @@
 import { HOME_SECTIONS, homeSectionsHtml, initHome } from "./home.js";
 import { parseNames } from "./names.js";
+import { canvasBlob, placesImage, queueImage } from "./share.js";
 
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
@@ -13,6 +14,7 @@ const ICONS = {
   copy: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
   check: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>`,
   chevron: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="16" height="16"><path d="m9 6 6 6-6 6"/></svg>`,
+  share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="15" height="15"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="m16 6-4-4-4 4"/><path d="M12 2v13"/></svg>`,
   more: `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" width="18" height="18"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>`,
 };
 
@@ -313,7 +315,8 @@ function renderHome() {
         </button>
       </section>
       ${homeSectionsHtml(joinFormHtml("code-input-bottom", "wide"))}
-    </main>`;
+    </main>
+    ${siteFooter("home-footer is-hidden")}`;
 
   app.querySelectorAll("[data-home='create']").forEach((btn) => btn.addEventListener("click", createRoomDialog));
   homeCleanup = initHome(app);
@@ -435,6 +438,15 @@ async function openRoom(rawCode) {
   }, POLL_MS);
 }
 
+/** Плашка внизу страниц. На стартовой она закреплена и скрыта на первом слайде. */
+function siteFooter(extra = "") {
+  return `<footer class="site-footer ${extra}">
+    <span class="site-footer-brand">${ICONS.logo}zQueue</span>
+    <span class="sep" aria-hidden="true"></span>
+    <span class="site-footer-credit">made by <b>zubko</b></span>
+  </footer>`;
+}
+
 function renderMissing(code) {
   app.innerHTML = `
     <header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a></header>
@@ -444,7 +456,8 @@ function renderMissing(code) {
         <p class="muted">Комната с кодом <span class="mono">${esc(code)}</span> не существует. Проверьте правильность кода: 6 латинских букв и цифр.</p>
         <a class="btn" href="/" data-link>На главную</a>
       </div>
-    </main>`;
+    </main>
+    ${siteFooter()}`;
 }
 
 async function refresh(force = false) {
@@ -625,16 +638,24 @@ function placeTable() {
   return placeCache.value;
 }
 
+/**
+ * Текст клетки таблицы вероятностей. Пустая клетка — место недостижимо (другой
+ * уровень срочности); внутри своего уровня любое место возможно, даже если
+ * моделирование его не выдало.
+ */
+function placeText(p, reachable) {
+  if (!reachable) return "";
+  const v = p * 100;
+  return v < 0.5 ? "<1%" : `${Math.round(v)}%`;
+}
+
+function shareButton(act) {
+  return `<button class="btn ghost sm" data-act="${act}">${ICONS.share}Поделиться</button>`;
+}
+
 function renderPlaces() {
   const { rows, total } = placeTable();
   if (!total) return "";
-  // Пустая клетка — место недостижимо (другой уровень срочности). Внутри своего
-  // уровня любое место возможно, даже если моделирование его не выдало.
-  const pct = (p, reachable) => {
-    if (!reachable) return "";
-    const v = p * 100;
-    return v < 0.5 ? "<1%" : `${Math.round(v)}%`;
-  };
   const head = Array.from({ length: total }, (_, i) => `<th>${i + 1}</th>`).join("");
   const body = rows
     .map(({ st, level, offset, probs, mean }) => {
@@ -643,14 +664,14 @@ function renderPlaces() {
         const p = reachable ? probs[place - offset] : 0;
         const shade = Math.round(Math.min(1, p) * 85);
         const exact = reachable && p < 0.001 ? "<0,1" : (p * 100).toFixed(1).replace(".", ",");
-        return `<td style="--p:${shade}%" class="${p >= 0.5 ? "hot" : ""}" title="${esc(st.name)} — ${place + 1} место: ${exact} %">${pct(p, reachable)}</td>`;
+        return `<td style="--p:${shade}%" class="${p >= 0.5 ? "hot" : ""}" title="${esc(st.name)} — ${place + 1} место: ${exact} %">${placeText(p, reachable)}</td>`;
       }).join("");
       const tag = room.state.urgentMode && level > 1 ? ` <span class="muted small">(${levelLabel(level)})</span>` : "";
       return `<tr><th class="name-col">${esc(st.name)}${tag}</th><td class="mean-col">${fmtNum(Math.round(mean * 10) / 10)}</td>${cells}</tr>`;
     })
     .join("");
   return `<section class="card places">
-    <div class="card-head"><h2>Вероятности мест</h2></div>
+    <div class="card-head"><h2>Вероятности мест</h2>${shareButton("share-places")}</div>
     <div class="place-table-wrap" id="place-table"><table class="place-table">
       <thead><tr><th class="name-col">Участник</th><th class="mean-col">Ср. место</th>${head}</tr></thead>
       <tbody>${body}</tbody>
@@ -716,7 +737,8 @@ function renderRoom() {
       ${room.tab === "queue" ? renderQueueTab() : ""}
       ${room.tab === "history" ? renderHistoryTab() : ""}
       ${room.tab === "settings" ? renderSettingsTab() : ""}
-    </main>`;
+    </main>
+    ${siteFooter()}`;
 
   for (const [id, value] of Object.entries(kept)) {
     const input = document.getElementById(id);
@@ -884,6 +906,7 @@ function renderScoring() {
   const session = awaitingSession();
   if (!session) return "";
   const edit = canEdit();
+  if (!edit) return renderCurrentQueue(session);
   const settings = room.state.settings;
   const order = session.order;
   const cutoff = session.unfinishedFrom ? order.indexOf(session.unfinishedFrom) : -1;
@@ -919,7 +942,10 @@ function renderScoring() {
         <h2>Подведение итогов</h2>
         <p class="muted small" style="margin:2px 0 0">Очередь от ${esc(fmtDate(session.createdAt, false))}${session.createdBy ? ` · составитель: ${esc(memberName(session.createdBy))}` : ""}</p>
       </div>
-      <span class="badge">Ожидает подведения итогов</span>
+      <div class="btn-row">
+        <span class="badge">Ожидает подведения итогов</span>
+        ${shareButton("share-queue")}
+      </div>
     </div>
     ${
       edit
@@ -927,7 +953,7 @@ function renderScoring() {
             <li>Если кто-то не успел сдать работу, нажмите «Сдал» напротив <b>первого</b> такого участника — все после него тоже отметятся как не успевшие.</li>
             <li>Нажмите «Подвести итоги». Если успели все, сразу нажмите «Сдали все».</li>
           </ol>`
-        : `<p class="muted small" style="margin:0 0 14px">Редактор отмечает, кто не успел сдать работу, и подводит итоги.</p>`
+        : ""
     }
     <div class="table order-table result-table">
       <div class="trow thead"><span class="num">№</span><span>Участник</span><span class="num">Начисление</span><span class="act">Результат</span></div>
@@ -948,6 +974,28 @@ function renderScoring() {
           </div>`
         : ""
     }
+  </section>`;
+}
+
+/** Текущая очередь для гостей: только порядок, без управления итогами. */
+function renderCurrentQueue(session) {
+  const rows = session.order
+    .map(
+      (id, i) => `<div class="trow">
+        <span class="num pos">${i + 1}</span>
+        <span class="cell-name"><span class="name">${esc(studentName(id))}</span></span>
+      </div>`,
+    )
+    .join("");
+  return `<section class="card">
+    <div class="card-head">
+      <div>
+        <h2>Текущая очередь</h2>
+        <p class="muted small" style="margin:2px 0 0">${esc(fmtDate(session.createdAt, false))} · ${session.order.length} ${plural(session.order.length, "участник", "участника", "участников")}</p>
+      </div>
+      ${shareButton("share-queue")}
+    </div>
+    <div class="table guest-queue">${rows}</div>
   </section>`;
 }
 
@@ -1294,6 +1342,109 @@ async function addMember(name) {
   });
 }
 
+/* ----- Поделиться картинкой ----- */
+
+function roomLink() {
+  return `${location.origin}/r/${room.code}`;
+}
+
+function shareQueue() {
+  const session = awaitingSession();
+  if (!session) return;
+  const count = session.order.length;
+  const canvas = queueImage({
+    title: room.state.title,
+    subtitle: `Очередь от ${fmtDate(session.createdAt, false)} · ${count} ${plural(count, "участник", "участника", "участников")}`,
+    names: session.order.map(studentName),
+  });
+  shareDialog(canvas, {
+    title: "Поделиться очередью",
+    file: `zqueue-${room.code}-ochered.png`,
+    text: `Очередь «${room.state.title}»: ${roomLink()}`,
+  });
+}
+
+function sharePlaces() {
+  const { rows, total } = placeTable();
+  if (!total) return;
+  const selected = room.state.pool.length > 0;
+  const canvas = placesImage({
+    title: "Вероятности мест",
+    subtitle: `${room.state.title} · ${selected ? "среди отмеченных" : "вся группа"}, ${total} ${plural(total, "участник", "участника", "участников")}`,
+    rows: rows.map(({ st, level, offset, probs, mean }) => ({
+      name: room.state.urgentMode && level > 1 ? `${st.name} (${levelLabel(level)})` : st.name,
+      mean: fmtNum(Math.round(mean * 10) / 10),
+      cells: Array.from({ length: total }, (_, place) => {
+        const reachable = place >= offset && place < offset + probs.length;
+        const p = reachable ? probs[place - offset] : 0;
+        return { p, text: placeText(p, reachable) };
+      }),
+    })),
+  });
+  shareDialog(canvas, {
+    title: "Поделиться таблицей",
+    file: `zqueue-${room.code}-veroyatnosti.png`,
+    text: `Вероятности мест — «${room.state.title}»: ${roomLink()}`,
+  });
+}
+
+/**
+ * Окно с картинкой и способами отправки: системное «Поделиться» (на телефоне —
+ * сразу в Telegram), копирование картинки для вставки в чат, скачивание и ссылка.
+ */
+async function shareDialog(canvas, { title, file, text }) {
+  const blob = await canvasBlob(canvas);
+  const png = new File([blob], file, { type: "image/png" });
+  const url = URL.createObjectURL(blob);
+  // На компьютере системное окно «Поделиться» обычно не умеет отправить картинку
+  // в Telegram, поэтому кнопку показываем только на сенсорных устройствах.
+  const touch = matchMedia("(pointer: coarse)").matches;
+  const canShare = touch && Boolean(navigator.canShare?.({ files: [png] }));
+  const canCopy = Boolean(window.ClipboardItem && navigator.clipboard?.write);
+  const pending = dialog({
+    title,
+    body: `<img class="share-preview" src="${url}" alt="${esc(title)}" />
+      <div class="share-actions">
+        ${canShare ? `<button class="btn" type="button" data-share="send">${ICONS.share}Отправить…</button>` : ""}
+        ${canCopy ? `<button class="btn ${canShare ? "ghost" : ""}" type="button" data-share="copy">Скопировать картинку</button>` : ""}
+        <button class="btn ghost" type="button" data-share="download">Скачать</button>
+        <button class="btn ghost" type="button" data-share="link">Скопировать ссылку</button>
+      </div>
+      ${
+        canShare
+          ? `<p class="field-hint">«Отправить» откроет список приложений, например Telegram.</p>`
+          : canCopy
+            ? ""
+            : `<p class="field-hint">Скачайте картинку и отправьте её в чат.</p>`
+      }`,
+    actions: [{ value: "cancel", label: "Закрыть", kind: "ghost" }],
+    column: true,
+  });
+  document.querySelector("dialog[open] .share-actions").addEventListener("click", async (event) => {
+    const action = event.target.closest("[data-share]")?.dataset.share;
+    try {
+      if (action === "send") {
+        await navigator.share({ files: [png], text });
+      } else if (action === "copy") {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        toast("Картинка скопирована");
+      } else if (action === "download") {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = file;
+        link.click();
+      } else if (action === "link") {
+        await copyText(roomLink());
+      }
+    } catch (err) {
+      // Закрытие системного окна «Поделиться» — не ошибка.
+      if (err?.name !== "AbortError") toast("Не получилось. Попробуйте скачать картинку.", "error");
+    }
+  });
+  await pending;
+  URL.revokeObjectURL(url);
+}
+
 function exportRoom() {
   const s = room.state;
   const data = {
@@ -1506,6 +1657,12 @@ app.addEventListener("click", async (event) => {
       break;
     case "export":
       exportRoom();
+      break;
+    case "share-queue":
+      shareQueue();
+      break;
+    case "share-places":
+      sharePlaces();
       break;
     case "bulk-add":
       bulkAddDialog();
