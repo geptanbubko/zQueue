@@ -773,6 +773,46 @@ div.field { position: relative; }
 
 .order-table .trow { grid-template-columns: 20px minmax(0, 1fr) 72px auto; }
 
+/* Подведение итогов */
+
+.result-table .trow { grid-template-columns: 24px minmax(0, 1fr) 72px 112px; }
+
+.result-toggle { padding: 0; border: 0; background: none; cursor: pointer; border-radius: 999px; }
+
+.result-toggle:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+.result-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.result-tag.is-done { color: var(--text-2); }
+
+.result-tag.is-done::before { content: "✓"; margin-right: 6px; color: var(--muted); }
+
+.result-tag.is-tail { color: var(--danger); border-color: var(--danger); background: var(--danger-bg); }
+
+.result-toggle:hover .result-tag.is-done { border-color: var(--danger); color: var(--danger); }
+
+.result-toggle:hover .result-tag.is-tail { border-color: var(--text); color: var(--text); background: var(--hover); }
+
+.scoring-steps { margin: 0 0 16px; padding-left: 20px; display: grid; gap: 4px; font-size: 13px; color: var(--text-2); }
+
+.scoring-summary { margin: 14px 0 0; font-size: 14px; }
+
+.scoring-actions { margin-top: 16px; }
+
+.scoring-actions .btn.danger { margin-left: auto; }
+
 .history-table .trow { grid-template-columns: 24px minmax(0, 1fr) 84px; }
 
 .members .trow { grid-template-columns: minmax(0, 1fr) auto auto; }
@@ -1028,6 +1068,8 @@ dialog .actions.column { flex-direction: column; align-items: stretch; }
   .roster .col-prio { display: none; }
   .meta-mobile { display: block; margin-top: -4px; }
   .order-table .trow { grid-template-columns: 20px minmax(0, 1fr) 52px auto; gap: 8px; padding: 6px 8px; }
+  .result-table .trow { grid-template-columns: 20px minmax(0, 1fr) 44px auto; }
+  .result-tag { min-width: 0; }
   .access-line { padding-left: 16px; }
   .join-row { flex-direction: column; }
   .code-input { flex: none; }

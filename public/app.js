@@ -768,6 +768,9 @@ function levelSwitchHtml(st, level, edit) {
 }
 
 function renderQueueTab() {
+  // Новую очередь нельзя сформировать, пока не подведены итоги прошлой, поэтому
+  // список участников на это время скрыт.
+  if (awaitingSession()) return `${renderScoring()}${renderPlaces()}`;
   const s = room.state;
   const edit = canEdit();
   const { result: chances, topLevel } = chanceMap();
@@ -831,7 +834,6 @@ function renderQueueTab() {
     </section>
     <div class="stack sticky">
       ${renderDraw()}
-      ${renderScoring()}
     </div>
   </div>
   ${renderPlaces()}`;
@@ -840,14 +842,10 @@ function renderQueueTab() {
 function renderDraw() {
   const s = room.state;
   const edit = canEdit();
-  const awaiting = awaitingSession();
   const last = lastActiveSession();
-  const undoLabel = !last ? "Отменить" : last.status === "awaiting" ? "Отменить очередь" : "Отменить начисление";
 
   let note;
-  if (awaiting) {
-    note = "Очередь сформирована. По окончании занятия отметьте участников, не успевших сдать работу, и подведите итоги.";
-  } else if (s.pool.length) {
+  if (s.pool.length) {
     note = `Будет сформирована очередь из ${s.pool.length} ${plural(s.pool.length, "участника", "участников", "участников")}. Порядок определяется однократно.`;
   } else {
     note = "Отметьте участников, сдающих работы на текущем занятии.";
@@ -870,54 +868,86 @@ function renderDraw() {
     ${
       edit
         ? `<div class="toolbar" style="margin-top:16px">
-            <button class="btn" data-act="create-queue" ${s.pool.length && !awaiting ? "" : "disabled"}>Сформировать очередь</button>
-            <button class="btn ghost" data-act="undo" ${last ? "" : "disabled"}>${undoLabel}</button>
+            <button class="btn" data-act="create-queue" ${s.pool.length ? "" : "disabled"}>Сформировать очередь</button>
+            ${last ? `<button class="btn ghost" data-act="undo">Отменить начисление</button>` : ""}
           </div>`
         : ""
     }
   </section>`;
 }
 
+/**
+ * Подведение итогов текущей очереди. Очередь идёт по порядку, поэтому отметка
+ * «не успел» ставится на первого несдавшего и распространяется на всех после него.
+ */
 function renderScoring() {
   const session = awaitingSession();
   if (!session) return "";
   const edit = canEdit();
   const settings = room.state.settings;
-  const cutoff = session.unfinishedFrom ? session.order.indexOf(session.unfinishedFrom) : -1;
-  const rows = session.order
+  const order = session.order;
+  const cutoff = session.unfinishedFrom ? order.indexOf(session.unfinishedFrom) : -1;
+  const done = cutoff >= 0 ? cutoff : order.length;
+  const rows = order
     .map((id, i) => {
       const tail = cutoff >= 0 && i >= cutoff;
-      const atCutoff = i === cutoff;
+      // «Сдал» → с этого участника начинается хвост; «Не успел» → он и все до него сдали.
+      const next = tail ? order[i + 1] ?? "" : id;
+      const status = tail
+        ? `<span class="result-tag is-tail">Не успел</span>`
+        : `<span class="result-tag is-done">Сдал</span>`;
       return `<div class="trow ${tail ? "tail" : ""}">
         <span class="num pos">${i + 1}</span>
         <span class="cell-name"><span class="name">${esc(studentName(id))}</span></span>
-        <span class="num">+${fmtNum(delayFor(i, session.order.length, cutoff))}</span>
+        <span class="num muted">+${fmtNum(delayFor(i, order.length, cutoff))}</span>
         <span class="act">${
           edit
-            ? `<button class="btn ${atCutoff ? "ghost" : "subtle"} sm" data-act="tail" data-session="${session.id}" data-id="${atCutoff ? "" : id}">${atCutoff ? "Снять" : "Не сдано"}</button>`
-            : ""
+            ? `<button class="result-toggle" data-act="tail" data-session="${session.id}" data-id="${next}"
+                title="${tail ? "Отметить, что сдал" : "Отметить, что не успел (вместе со всеми после)"}">${status}</button>`
+            : status
         }</span>
       </div>`;
     })
     .join("");
-  return `<section class="card">
+  const summary =
+    cutoff >= 0
+      ? `Сдали <b>${done}</b> из ${order.length}, не успели <b>${order.length - done}</b>`
+      : `Все ${order.length} ${plural(order.length, "участник", "участника", "участников")} отмечены как сдавшие`;
+  return `<section class="card scoring">
     <div class="card-head">
       <div>
-        <h2>Текущая очередь</h2>
-        <p class="muted small" style="margin:2px 0 0">${esc(fmtDate(session.createdAt, false))}${session.createdBy ? ` · составитель: ${esc(memberName(session.createdBy))}` : ""}</p>
+        <h2>Подведение итогов</h2>
+        <p class="muted small" style="margin:2px 0 0">Очередь от ${esc(fmtDate(session.createdAt, false))}${session.createdBy ? ` · составитель: ${esc(memberName(session.createdBy))}` : ""}</p>
       </div>
       <span class="badge">Ожидает подведения итогов</span>
     </div>
-    <div class="table order-table">
-      <div class="trow thead"><span class="num">№</span><span>Участник</span><span class="num">Начисление</span><span></span></div>
+    ${
+      edit
+        ? `<ol class="scoring-steps">
+            <li>Если кто-то не успел сдать работу, нажмите «Сдал» напротив <b>первого</b> такого участника — все после него тоже отметятся как не успевшие.</li>
+            <li>Нажмите «Подвести итоги». Если успели все, сразу нажмите «Сдали все».</li>
+          </ol>`
+        : `<p class="muted small" style="margin:0 0 14px">Редактор отмечает, кто не успел сдать работу, и подводит итоги.</p>`
+    }
+    <div class="table order-table result-table">
+      <div class="trow thead"><span class="num">№</span><span>Участник</span><span class="num">Начисление</span><span class="act">Результат</span></div>
       ${rows}
     </div>
-    <p class="hint">${
-      cutoff >= 0
-        ? `Участники начиная с ${cutoff + 1}-го места не успели сдать работу: начисление +${fmtNum(settings.tailScore)}.`
-        : "Отметьте первого участника, не успевшего сдать работу. Если работу сдали все, подведите итоги без отметки."
-    } Участникам, не включённым в очередь, начисляется +${fmtNum(session.order.length > 1 ? settings.absenceScore : 0)}.</p>
-    ${edit ? `<div class="toolbar" style="margin-top:16px"><button class="btn" data-act="score" data-session="${session.id}">Подвести итоги</button></div>` : ""}
+    <p class="scoring-summary">${summary}.</p>
+    <p class="hint" style="margin-top:4px">Не успевшим начисляется +${fmtNum(settings.tailScore)}, участникам, не включённым в очередь, — +${fmtNum(order.length > 1 ? settings.absenceScore : 0)}.</p>
+    ${
+      edit
+        ? `<div class="toolbar scoring-actions">
+            ${
+              cutoff >= 0
+                ? `<button class="btn" data-act="score" data-session="${session.id}">Подвести итоги</button>
+                   <button class="btn ghost" data-act="all-done" data-session="${session.id}">Сдали все</button>`
+                : `<button class="btn" data-act="all-done" data-session="${session.id}">Сдали все</button>`
+            }
+            <button class="btn danger" data-act="undo">Отменить очередь</button>
+          </div>`
+        : ""
+    }
   </section>`;
 }
 
@@ -1524,6 +1554,13 @@ app.addEventListener("click", async (event) => {
     case "score":
       command({ type: "session.scored", sessionId: el.getAttribute("data-session") }, "Итоги подведены");
       break;
+    case "all-done": {
+      const sessionId = el.getAttribute("data-session");
+      // Сначала снимаем отметку «не успел», если она была.
+      if (awaitingSession()?.unfinishedFrom && !(await command({ type: "session.tailMarked", sessionId, from: null }))) break;
+      command({ type: "session.scored", sessionId }, "Итоги подведены: сдали все");
+      break;
+    }
     case "revoke": {
       const m = s.members.find((x) => x.id === id);
       const ok = await dialog({
