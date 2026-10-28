@@ -84,6 +84,8 @@ function fail(message: string, status = 400): never {
 export const LOGGED = new Set(["room.created", "member.added", "member.revoked", "queue.created", "session.cancelled"]);
 
 export const DEFAULT_SETTINGS: Settings = { absenceScore: 0.5, tailScore: 1 };
+/** Метка файла экспорта комнаты. Файлы без неё — queue-data.json старой версии. */
+export const EXPORT_FORMAT = "zqueue";
 export const MAX_STUDENTS = 300;
 
 export function normalizeName(value: unknown, max = 120): string {
@@ -344,8 +346,12 @@ function validId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 64;
 }
 
-/** Перенос данных из queue-data.json старой версии. */
+/**
+ * Перенос данных из файла: экспорта комнаты (format: "zqueue") или
+ * queue-data.json старой версии.
+ */
 function parseImport(state: RoomState, data: any) {
+  const full = data?.format === EXPORT_FORMAT;
   if (state.history.length > 0) fail("Импорт возможен только в комнату без сдач.");
   if (!data || !Array.isArray(data.students) || !Array.isArray(data.history)) {
     fail("В файле нет списка группы и истории.");
@@ -360,21 +366,36 @@ function parseImport(state: RoomState, data: any) {
     return { id: s.id, name, burden };
   });
   const known = new Set(students.map((s) => s.id));
+  // Редакторы в новой комнате другие, поэтому авторство сохраняется, только если
+  // автор — участник этой комнаты.
+  const memberIds = new Set(state.members.map((m) => m.id));
+  const author = (id: unknown) => (typeof id === "string" && memberIds.has(id) ? id : null);
   const history: Session[] = data.history.slice(0, 500).map((h: any) => {
     if (!validId(h?.id) || !Array.isArray(h.order)) fail("В файле есть некорректная запись истории.");
     const priority = cleanPriority(h.priority, new Set(idList(h.order)));
     if (Object.keys(priority).length === 0) {
       for (const id of idList(h.urgent)) priority[id] = 3;
     }
+    let status: Session["status"] = h.awaitingScore ? "awaiting" : "scored";
+    if (full) {
+      if (h.status !== "awaiting" && h.status !== "scored" && h.status !== "cancelled") {
+        fail("В файле есть некорректная запись истории.");
+      }
+      status = h.status;
+    }
     const session: Session = {
       id: h.id,
       createdAt: typeof h.createdAt === "string" ? h.createdAt : "",
-      createdBy: null,
+      createdBy: full ? author(h.createdBy) : null,
       order: idList(h.order),
       priority,
-      unfinishedFrom: typeof h.unfinishedFrom === "string" ? h.unfinishedFrom : null,
-      status: h.awaitingScore ? "awaiting" : "scored",
+      unfinishedFrom: status !== "cancelled" && typeof h.unfinishedFrom === "string" ? h.unfinishedFrom : null,
+      status,
     };
+    if (status === "cancelled") {
+      session.cancelledAt = typeof h.cancelledAt === "string" ? h.cancelledAt : "";
+      session.cancelledBy = author(h.cancelledBy);
+    }
     if (session.status === "scored") {
       if (h.increments && typeof h.increments === "object") {
         session.increments = Object.fromEntries(
@@ -386,10 +407,20 @@ function parseImport(state: RoomState, data: any) {
     }
     return session;
   });
+  if (history.filter((h) => h.status === "awaiting").length > 1) {
+    fail("В файле несколько очередей, ожидающих подведения итогов.");
+  }
   const pool = idList(data.pool).filter((id) => known.has(id));
+  const settings: Settings = full
+    ? {
+        absenceScore: parseScore(data.settings?.absenceScore, "Отсутствие в очереди"),
+        tailScore: parseScore(data.settings?.tailScore, "Работа не сдана"),
+      }
+    : { ...state.settings };
   return {
     students,
     history,
+    settings,
     pool,
     urgentMode: Boolean(data.urgentMode),
     priority: cleanPriority(data.priority, new Set(pool)),
@@ -563,6 +594,7 @@ export function apply(prev: RoomState | null, change: Change, meta: ChangeMeta):
       s.pool = [...p.pool];
       s.urgentMode = p.urgentMode;
       s.priority = { ...p.priority };
+      if (p.settings) s.settings = { ...p.settings };
       break;
     default:
       throw new Error(`unknown change ${change.type}`);

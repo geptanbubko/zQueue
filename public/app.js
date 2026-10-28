@@ -986,13 +986,19 @@ function renderSettingsTab() {
             ${
               s.history.length === 0
                 ? `<h3>Перенос данных</h3>
-                  <p class="muted small" style="margin-top:0">Загрузите файл queue-data.json из предыдущей версии. Список участников и история будут перенесены в комнату.</p>
+                  <p class="muted small" style="margin-top:0">Загрузите файл экспорта комнаты или queue-data.json из предыдущей версии. Список участников, история и параметры начислений будут перенесены в комнату.</p>
                   <label class="btn ghost">Выбрать файл<input type="file" accept="application/json,.json" data-act="import" hidden /></label>`
                 : ""
             }
           </section>`
         : ""
     }
+
+    <section class="card">
+      <h2>Экспорт</h2>
+      <p class="muted small">Файл JSON со списком участников, приоритетами, историей очередей и параметрами начислений. Его можно загрузить в новую комнату через «Перенос данных».</p>
+      <div class="toolbar"><button class="btn ghost" data-act="export">Скачать JSON</button></div>
+    </section>
 
     <section class="card">
       <h2>Текущее устройство</h2>
@@ -1061,6 +1067,28 @@ async function addMember(name) {
   });
 }
 
+function exportRoom() {
+  const s = room.state;
+  const data = {
+    format: "zqueue",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    title: s.title,
+    settings: s.settings,
+    students: s.students,
+    pool: s.pool,
+    urgentMode: s.urgentMode,
+    priority: s.priority,
+    history: s.history,
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2) + "\n"], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `zqueue-${room.code}-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+}
+
 async function importFile(file) {
   let data;
   try {
@@ -1098,6 +1126,9 @@ app.addEventListener("click", async (event) => {
   switch (el.getAttribute("data-act")) {
     case "copy-room":
       copyText(`${location.origin}/r/${room.code}`);
+      break;
+    case "export":
+      exportRoom();
       break;
     case "dismiss-notice":
       room.notice = null;
