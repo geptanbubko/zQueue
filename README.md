@@ -42,8 +42,8 @@ npm run db:migrate
 npm run deploy
 ```
 
-Сайт будет доступен по адресу `queue.<аккаунт>.workers.dev`. Свой домен подключается в
-панели Cloudflare: Workers → queue → Settings → Domains & Routes.
+Сайт будет доступен по адресу `zqueue.<аккаунт>.workers.dev`. Свой домен подключается в
+панели Cloudflare: Workers → zqueue → Settings → Domains & Routes.
 
 Резервная копия базы:
 
