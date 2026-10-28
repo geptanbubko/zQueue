@@ -699,7 +699,7 @@ function renderPlaces() {
         return `<td style="--p:${shade}%" class="${p >= 0.5 ? "hot" : ""}" title="${esc(st.name)} — ${place + 1} место: ${exact} %">${placeText(p, reachable)}</td>`;
       }).join("");
       const tag = room.state.urgentMode && level > 1 ? ` <span class="muted small">(${levelLabel(level)})</span>` : "";
-      return `<tr><th class="name-col">${esc(st.name)}${tag}</th><td class="mean-col">${fmtNum(Math.round(mean * 10) / 10)}</td>${cells}</tr>`;
+      return `<tr><th class="name-col" title="${esc(st.name)}">${esc(st.name)}${tag}</th><td class="mean-col">${fmtNum(Math.round(mean * 10) / 10)}</td>${cells}</tr>`;
     })
     .join("");
   return `<section class="card places">
@@ -885,7 +885,7 @@ function renderQueueTab() {
             </div>`
           : `<div class="empty">Список участников пуст.${edit ? " Добавьте участников на вкладке «Настройки»." : ""}</div>`
       }
-      <p class="hint">Отметьте участников, сдающих работы на текущем занятии.</p>
+      ${edit ? `<p class="hint">Отметьте участников, сдающих работы на текущем занятии.</p>` : ""}
     </section>
     ${edit ? `<div class="stack sticky">${renderDraw()}</div>` : ""}
   </div>
@@ -1400,7 +1400,7 @@ function shareQueue() {
   shareDialog(canvas, {
     title: "Поделиться очередью",
     file: `zqueue-${room.code}-ochered.png`,
-    text: `Очередь «${room.state.title}»: ${roomLink()}`,
+    text: `Очередь на сдачу «${room.state.title}»\nСмотреть по ссылке: ${roomLink()}`,
   });
 }
 
@@ -1424,7 +1424,7 @@ function sharePlaces() {
   shareDialog(canvas, {
     title: "Поделиться таблицей",
     file: `zqueue-${room.code}-veroyatnosti.png`,
-    text: `Вероятности мест — «${room.state.title}»: ${roomLink()}`,
+    text: `Шансы на места в следующей очереди «${room.state.title}»\nСмотреть по ссылке: ${roomLink()}`,
   });
 }
 
@@ -1450,13 +1450,7 @@ async function shareDialog(canvas, { title, file, text }) {
         <button class="btn ghost" type="button" data-share="download">Скачать</button>
         <button class="btn ghost" type="button" data-share="link">Скопировать ссылку</button>
       </div>
-      ${
-        canShare
-          ? `<p class="field-hint">«Отправить» откроет список приложений, например Telegram.</p>`
-          : canCopy
-            ? ""
-            : `<p class="field-hint">Скачайте картинку и отправьте её в чат.</p>`
-      }`,
+      ${canShare || canCopy ? "" : `<p class="field-hint">Скачайте картинку и отправьте её в чат.</p>`}`,
     actions: [{ value: "cancel", label: "Закрыть", kind: "ghost" }],
     column: true,
   });
