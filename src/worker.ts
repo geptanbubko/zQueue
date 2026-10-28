@@ -5,6 +5,7 @@ import {
   DomainError,
   LOGGED,
   normalizeName,
+  parseSettings,
   type Change,
   type Member,
   type RoomState,
@@ -113,7 +114,7 @@ async function createRoom(env: Env, req: Request): Promise<Response> {
   const owner = { id: crypto.randomUUID(), name };
   const token = randomToken();
   const tokenHash = await sha256(token);
-  const change = createdChange(title, owner);
+  const change = createdChange(title, owner, parseSettings(body?.settings));
   const now = new Date().toISOString();
   const state = apply(null, change, { createdAt: now, actorId: owner.id });
 

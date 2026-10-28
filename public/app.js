@@ -336,6 +336,9 @@ function renderHome() {
   if (!matchMedia("(max-width: 640px)").matches) document.getElementById("code-input").focus({ preventScroll: true });
 }
 
+/** Как DEFAULT_SETTINGS в src/domain.ts. */
+const DEFAULT_SETTINGS = { absenceScore: 0.5, tailScore: 1, drawMode: "relative", beta: 2.5, sigma: 0.35 };
+
 async function createRoomDialog() {
   const pending = dialog({
     title: "Создание комнаты",
@@ -344,7 +347,12 @@ async function createRoomDialog() {
       { name: "title", label: "Дисциплина", placeholder: "Компьютерная графика", required: true },
       { name: "name", label: "Ваше имя", placeholder: "Фамилия Имя", required: true },
     ],
-    after: bulkFieldHtml("Список группы"),
+    after: `${bulkFieldHtml("Список группы")}
+      <details class="advanced">
+        <summary>Дополнительные параметры</summary>
+        ${settingsFieldsHtml(DEFAULT_SETTINGS)}
+        <p class="field-hint">Параметры можно изменить позже на вкладке «Настройки».</p>
+      </details>`,
     actions: [{ value: "ok", label: "Создать" }],
   });
   const submit = document.querySelector('dialog[open] button[value="ok"]');
@@ -356,7 +364,10 @@ async function createRoomDialog() {
   const names = parseNames(values.names);
   let data;
   try {
-    data = await api("/api/rooms", { method: "POST", body: { title: values.title, name: values.name } });
+    data = await api("/api/rooms", {
+      method: "POST",
+      body: { title: values.title, name: values.name, settings: settingsValues(values) },
+    });
   } catch (err) {
     toast(err.message, "error");
     return;
@@ -497,14 +508,67 @@ function levelLabel(level) {
   return level === 3 ? "высокий" : level === 2 ? "средний" : "обычный";
 }
 
+const DRAW_MODES = [
+  {
+    value: "relative",
+    label: "По разнице приоритетов (рекомендовано)",
+    hint: "Жеребьёвка, в которой шансы тем выше, чем дольше участник ждал раньше. Важна только разница приоритетов, поэтому преимущество не ослабевает к концу семестра. Сила компенсации задаёт, насколько велико это преимущество.",
+  },
+  {
+    value: "debt",
+    label: "Упорядочивание по приоритету",
+    hint: "Участники выстраиваются по убыванию приоритета, а случайный разброс перемешивает тех, у кого он близок. Чем меньше разброс, тем строже порядок.",
+  },
+  {
+    value: "random",
+    label: "Полностью случайно",
+    hint: "У всех равные шансы, приоритет на порядок не влияет (но продолжает начисляться).",
+  },
+  {
+    value: "legacy",
+    label: "Прежняя формула",
+    hint: "Вероятность пропорциональна 1 + p. Преимущество небольшое и уменьшается по мере накопления приоритета у всех участников.",
+  },
+];
+
+function drawModeLabel(mode) {
+  return DRAW_MODES.find((m) => m.value === mode)?.label ?? mode;
+}
+
+/** Ключ жеребьёвки, как на сервере (drawKey в src/domain.ts): чем меньше, тем раньше. */
+function drawKey(burden, settings, random) {
+  const u = Math.max(random(), Number.EPSILON);
+  switch (settings.drawMode) {
+    case "relative":
+      return Math.log(-Math.log(u)) - settings.beta * burden;
+    case "debt":
+      return -burden + settings.sigma * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * random());
+    case "random":
+      return u;
+    default:
+      return -Math.log(u) / (1 + burden);
+  }
+}
+
 function chanceMap() {
   const s = room.state;
+  const { drawMode, beta } = s.settings;
   const pool = s.students.filter((st) => s.pool.includes(st.id));
   const result = {};
+  // Для упорядочивания формулы нет — берём долю первых мест из моделирования.
+  const simulated = drawMode === "debt" && pool.length ? placeTable().rows : null;
   for (const level of [3, 2, 1]) {
     const band = pool.filter((st) => levelOf(st.id) === level);
-    const total = band.reduce((sum, st) => sum + 1 + st.burden, 0);
-    for (const st of band) result[st.id] = { level, chance: total > 0 ? (1 + st.burden) / total : 0 };
+    if (simulated) {
+      for (const row of simulated) if (row.level === level) result[row.st.id] = { level, chance: row.probs[0] };
+      continue;
+    }
+    // e^(β·p) считаем от максимума в группе, чтобы не было переполнения.
+    const top = Math.max(...band.map((st) => st.burden));
+    const weight = (st) =>
+      drawMode === "relative" ? Math.exp(beta * (st.burden - top)) : drawMode === "random" ? 1 : 1 + st.burden;
+    const total = band.reduce((sum, st) => sum + weight(st), 0);
+    for (const st of band) result[st.id] = { level, chance: total > 0 ? weight(st) / total : 0 };
   }
   const topLevel = [3, 2, 1].find((level) => pool.some((st) => levelOf(st.id) === level));
   return { result, topLevel };
@@ -514,15 +578,16 @@ let placeCache = { key: "", value: null };
 
 /**
  * Вероятность каждого места для каждого отмеченного участника (если никто не
- * отмечен — для всех). Повторяет жеребьёвку сервера (взвешенная перетасовка
- * внутри уровней 3 → 2 → 1) много раз с фиксированным зерном, чтобы таблица не
+ * отмечен — для всех). Повторяет жеребьёвку сервера (выбранным способом внутри
+ * уровней 3 → 2 → 1) много раз с фиксированным зерном, чтобы таблица не
  * менялась от перерисовки к перерисовке.
  */
 function placeTable() {
   const s = room.state;
   const selected = s.students.filter((st) => s.pool.includes(st.id));
   const pool = selected.length ? selected : s.students;
-  const key = JSON.stringify(pool.map((st) => [st.id, st.name, st.burden, levelOf(st.id)]));
+  const settings = s.settings;
+  const key = JSON.stringify([settings, pool.map((st) => [st.id, st.name, st.burden, levelOf(st.id)])]);
   if (placeCache.key === key) return placeCache.value;
   const rows = [];
   let seed = 0x9e3779b9;
@@ -537,13 +602,12 @@ function placeTable() {
     const band = pool.filter((st) => levelOf(st.id) === level);
     const n = band.length;
     if (!n) continue;
-    const weights = band.map((st) => 1 + st.burden);
     const counts = band.map(() => new Float64Array(n));
     const runs = n === 1 ? 1 : Math.max(2000, Math.min(20000, Math.floor(1.5e6 / n)));
     const keys = new Float64Array(n);
     const idx = band.map((_, i) => i);
     for (let r = 0; r < runs; r++) {
-      for (let i = 0; i < n; i++) keys[i] = -Math.log(Math.max(random(), Number.EPSILON)) / weights[i];
+      for (let i = 0; i < n; i++) keys[i] = drawKey(band[i].burden, settings, random);
       idx.sort((a, b) => keys[a] - keys[b]);
       for (let place = 0; place < n; place++) counts[idx[place]][place]++;
     }
@@ -726,7 +790,7 @@ function renderQueueTab() {
           <span class="meta-mobile">Приоритет: ${fmtNum(st.burden)}</span>
           ${s.urgentMode && selected ? levelSwitchHtml(st, level, edit) : ""}
         </span>
-        <span class="num col-prio" title="Вес ${fmtNum(1 + st.burden)}">${fmtNum(st.burden)}</span>
+        <span class="num col-prio">${fmtNum(st.burden)}</span>
         <span class="num">${chance}</span>
         <span class="act">${edit ? `<button class="btn ghost icon" data-act="student-menu" data-id="${st.id}" aria-label="Действия">${ICONS.more}</button>` : ""}</span>
       </div>`;
@@ -962,7 +1026,22 @@ function eventText(e) {
     case "settings.changed": {
       const part = (label, key) =>
         p.from && p.from[key] === p.to[key] ? "" : `${label} ${p.from ? `${fmtNum(p.from[key])} → ` : ""}${fmtNum(p.to[key])}`;
-      return `Изменены параметры начислений: ${[part("отсутствие в очереди", "absenceScore"), part("работа не сдана", "tailScore")].filter(Boolean).join("; ")}`;
+      const scoring = [part("отсутствие в очереди", "absenceScore"), part("работа не сдана", "tailScore")].filter(Boolean);
+      // Записи до появления выбора жеребьёвки не содержат её параметров.
+      const draw =
+        p.to.drawMode === undefined
+          ? []
+          : [
+              p.from?.drawMode === p.to.drawMode ? "" : `способ «${drawModeLabel(p.from?.drawMode ?? "legacy")}» → «${drawModeLabel(p.to.drawMode)}»`,
+              part("β", "beta"),
+              part("σ", "sigma"),
+            ].filter(Boolean);
+      return [
+        scoring.length ? `Изменены параметры начислений: ${scoring.join("; ")}` : "",
+        draw.length ? `Изменены параметры жеребьёвки: ${draw.join("; ")}` : "",
+      ]
+        .filter(Boolean)
+        .join(". ");
     }
     case "student.added":
       return `Добавлен участник: ${p.name} (приоритет ${fmtNum(p.burden)})`;
@@ -1057,15 +1136,10 @@ function renderSettingsTab() {
     }
 
     <section class="card">
-      <h2>Параметры начисления</h2>
-      <p class="muted small">За позицию в очереди начисляется от 0 (первое место) до 1 (последнее место). Значения ниже применяются при подведении итогов.</p>
+      <h2>Параметры очереди</h2>
+      <p class="muted small">Как накопленный приоритет влияет на порядок и сколько начисляется по итогам занятия.</p>
       <form class="form-grid" data-form="settings">
-        <label class="field">Отсутствие в очереди
-          <input id="set-absence" class="input" type="number" step="0.05" min="0" max="100" value="${s.settings.absenceScore}" ${edit ? "" : "disabled"} />
-        </label>
-        <label class="field">Работа не сдана
-          <input id="set-tail" class="input" type="number" step="0.05" min="0" max="100" value="${s.settings.tailScore}" ${edit ? "" : "disabled"} />
-        </label>
+        ${settingsFieldsHtml(s.settings, !edit)}
         ${edit ? `<div><button class="btn">Сохранить</button></div>` : ""}
       </form>
     </section>
@@ -1209,6 +1283,97 @@ function splitNew(names, current = []) {
   for (const name of names) (taken.has(name.toLowerCase()) ? existing : fresh).push(name);
   return { fresh, existing };
 }
+
+/**
+ * Все параметры комнаты: способ жеребьёвки с его параметром и начисления.
+ * Подсказка и нужный параметр переключаются обработчиком change на документе.
+ */
+function settingsFieldsHtml(settings, disabled = false) {
+  const off = disabled ? "disabled" : "";
+  const current = DRAW_MODES.find((m) => m.value === settings.drawMode) ?? DRAW_MODES[0];
+  return `<div class="form-grid" data-draw>
+    <div class="field">
+      <span class="field-label">Способ жеребьёвки ${helpHtml(current.hint, "data-draw-hint")}</span>
+      <select class="input" name="drawMode" data-draw-mode aria-label="Способ жеребьёвки" ${off}>
+        ${DRAW_MODES.map((m) => `<option value="${m.value}" ${m.value === current.value ? "selected" : ""}>${esc(m.label)}</option>`).join("")}
+      </select>
+    </div>
+    ${sliderHtml({ ...SLIDERS.beta, mode: "relative", value: settings.beta, hidden: current.value !== "relative", off })}
+    ${sliderHtml({ ...SLIDERS.sigma, mode: "debt", value: settings.sigma, hidden: current.value !== "debt", off })}
+    ${sliderHtml({ ...SLIDERS.absenceScore, value: settings.absenceScore, off })}
+    ${sliderHtml({ ...SLIDERS.tailScore, value: settings.tailScore, off })}
+  </div>`;
+}
+
+/** Значения формы параметров в виде полей команды settings.changed. */
+function settingsValues(values) {
+  const { drawMode, beta, sigma, absenceScore, tailScore } = values;
+  return { drawMode, beta, sigma, absenceScore, tailScore };
+}
+
+/** Значок «?» с подсказкой при наведении или фокусе. */
+function helpHtml(text, attr = "") {
+  return `<span class="help" tabindex="0" role="img" aria-label="${esc(text)}" data-tip="${esc(text)}" ${attr}>?</span>`;
+}
+
+/** Рекомендуемые диапазоны параметров: за их пределами режимы теряют смысл. */
+const SLIDERS = {
+  beta: {
+    name: "beta",
+    label: "Сила компенсации",
+    help: "Насколько сильнее шансы у тех, кто раньше ждал дольше. При разнице приоритетов в 1 вес отличается в e^β раз (при 2,5 — примерно в 12 раз).",
+    min: 1, max: 4, step: 0.5, fallback: 2.5, left: "слабее", right: "сильнее",
+  },
+  sigma: {
+    name: "sigma",
+    label: "Случайный разброс",
+    help: "Насколько перемешиваются участники с близким приоритетом. Меньше — порядок строже следует приоритету.",
+    min: 0.2, max: 0.6, step: 0.05, fallback: 0.35, left: "строже", right: "случайнее",
+  },
+  absenceScore: {
+    name: "absenceScore",
+    label: "Отсутствие в очереди",
+    help: "Начисляется участникам, которые не сдавали на этом занятии. 0,5 — как средняя позиция: пропуск не меняет положения относительно группы.",
+    min: 0, max: 1, step: 0.1, fallback: 0.5, left: "меньше", right: "больше",
+  },
+  tailScore: {
+    name: "tailScore",
+    label: "Работа не сдана",
+    help: "Начисляется тем, кто не успел сдать работу. За позицию в очереди начисляется от 0 (первое место) до 1 (последнее), поэтому 1 — как за последнее место.",
+    min: 0.5, max: 2, step: 0.25, fallback: 1, left: "меньше", right: "больше",
+  },
+};
+
+function sliderHtml({ name, label, help, min, max, step, fallback, left, right, mode, value, hidden, off }) {
+  const clamped = Math.min(max, Math.max(min, Math.round((value - min) / step) * step + min));
+  const count = Math.round((max - min) / step);
+  const ticks = Array.from({ length: count + 1 }, (_, i) => {
+    const v = Math.round((min + i * step) * 100) / 100;
+    return `<span class="${v === fallback ? "is-default" : ""}" title="${fmtNum(v)}${v === fallback ? " — по умолчанию" : ""}"></span>`;
+  }).join("");
+  return `<div class="field" ${mode ? `data-draw-param="${mode}"` : ""} ${hidden ? "hidden" : ""}>
+      <span class="slider-head"><span class="field-label">${esc(label)} ${helpHtml(help)}</span><output class="mono" data-slider-value>${fmtNum(clamped)}</output></span>
+      <input class="slider" name="${name}" type="range" min="${min}" max="${max}" step="${step}" value="${clamped}" aria-label="${esc(label)}" data-slider ${off} />
+      <span class="slider-ticks" aria-hidden="true">${ticks}</span>
+      <span class="slider-scale field-hint"><span>${fmtNum(min)} · ${left}</span><span>по умолчанию ${fmtNum(fallback)}</span><span>${right} · ${fmtNum(max)}</span></span>
+    </div>`;
+}
+
+document.addEventListener("input", (event) => {
+  const slider = event.target.closest?.("[data-slider]");
+  if (slider) slider.closest(".field").querySelector("[data-slider-value]").textContent = fmtNum(Number(slider.value));
+});
+
+document.addEventListener("change", (event) => {
+  const select = event.target.closest?.("[data-draw-mode]");
+  if (!select) return;
+  const box = select.closest("[data-draw]");
+  const hint = DRAW_MODES.find((m) => m.value === select.value)?.hint ?? "";
+  const help = box.querySelector("[data-draw-hint]");
+  help.dataset.tip = hint;
+  help.setAttribute("aria-label", hint);
+  for (const el of box.querySelectorAll("[data-draw-param]")) el.hidden = el.dataset.drawParam !== select.value;
+});
 
 function bulkFieldHtml(label) {
   return `<label class="field">${esc(label)}
@@ -1406,14 +1571,7 @@ app.addEventListener("submit", async (event) => {
     input.value = "";
     await addMember(name);
   } else if (kind === "settings") {
-    command(
-      {
-        type: "settings.changed",
-        absenceScore: document.getElementById("set-absence").value,
-        tailScore: document.getElementById("set-tail").value,
-      },
-      "Параметры сохранены",
-    );
+    command({ type: "settings.changed", ...settingsValues(Object.fromEntries(new FormData(form))) }, "Параметры сохранены");
   } else if (kind === "rename") {
     command({ type: "room.renamed", title: document.getElementById("room-title").value }, "Изменения сохранены");
   }

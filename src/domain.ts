@@ -24,9 +24,22 @@ export interface Student {
   burden: number;
 }
 
+/**
+ * Способ жеребьёвки внутри уровня срочности:
+ * relative — вероятность пропорциональна e^(β·p), важна только разница приоритетов;
+ * debt — сортировка по приоритету со случайным разбросом σ;
+ * random — равные шансы, приоритет не учитывается;
+ * legacy — прежняя формула: вероятность пропорциональна 1 + p.
+ */
+export type DrawMode = "relative" | "debt" | "random" | "legacy";
+export const DRAW_MODES: readonly DrawMode[] = ["relative", "debt", "random", "legacy"];
+
 export interface Settings {
   absenceScore: number;
   tailScore: number;
+  drawMode: DrawMode;
+  beta: number;
+  sigma: number;
 }
 
 export interface Session {
@@ -100,7 +113,9 @@ export const LOGGED = new Set([
   "session.scoreReverted",
 ]);
 
-export const DEFAULT_SETTINGS: Settings = { absenceScore: 0.5, tailScore: 1 };
+export const DEFAULT_SETTINGS: Settings = { absenceScore: 0.5, tailScore: 1, drawMode: "relative", beta: 2.5, sigma: 0.35 };
+/** Комнаты, созданные до появления выбора, сохраняют прежнюю формулу. */
+const LEGACY_DRAW = { drawMode: "legacy", beta: DEFAULT_SETTINGS.beta, sigma: DEFAULT_SETTINGS.sigma } as const;
 /** Метка файла экспорта комнаты. Файлы без неё — queue-data.json старой версии. */
 export const EXPORT_FORMAT = "zqueue";
 export const MAX_STUDENTS = 300;
@@ -156,12 +171,27 @@ function prioritySnapshot(state: RoomState): Record<string, number> {
   return snapshot;
 }
 
-function weightedShuffle(students: Student[], random: () => number): string[] {
+/** Ключ участника в жеребьёвке: чем меньше, тем раньше в очереди. */
+export function drawKey(burden: number, settings: Settings, random: () => number): number {
+  const u = Math.max(random(), Number.EPSILON);
+  switch (settings.drawMode) {
+    case "relative":
+      // Логарифм ключа взвешенной выборки с весом e^(β·p): без переполнения при большом p.
+      return Math.log(-Math.log(u)) - settings.beta * burden;
+    case "debt": {
+      const gauss = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * random());
+      return -burden + settings.sigma * gauss;
+    }
+    case "random":
+      return u;
+    default:
+      return -Math.log(u) / (1 + burden);
+  }
+}
+
+function drawOrder(students: Student[], settings: Settings, random: () => number): string[] {
   return students
-    .map((student) => {
-      const u = Math.max(random(), Number.EPSILON);
-      return { id: student.id, key: -Math.log(u) / (1 + student.burden) };
-    })
+    .map((student) => ({ id: student.id, key: drawKey(student.burden, settings, random) }))
     .sort((a, b) => a.key - b.key)
     .map((item) => item.id);
 }
@@ -178,6 +208,32 @@ function parseScore(value: unknown, label: string): number {
     fail(`${label}: нужно число от 0 до 100.`);
   }
   return Math.round(num * 1000) / 1000;
+}
+
+function parseRange(value: unknown, label: string, min: number, max: number): number {
+  const num = typeof value === "string" ? Number(value.replace(",", ".")) : value;
+  if (typeof num !== "number" || !Number.isFinite(num) || num < min || num > max) {
+    fail(`${label}: нужно число от ${String(min).replace(".", ",")} до ${max}.`);
+  }
+  return Math.round(num * 1000) / 1000;
+}
+
+/** Проверяет параметры. Чего нет в raw, берётся из fallback. */
+export function parseSettings(raw: any, fallback: Settings = DEFAULT_SETTINGS): Settings {
+  const pick = (key: keyof Settings) => (raw?.[key] === undefined || raw[key] === "" ? fallback[key] : raw[key]);
+  const drawMode = pick("drawMode");
+  if (!DRAW_MODES.includes(drawMode as DrawMode)) fail("Неизвестный способ жеребьёвки.");
+  return {
+    absenceScore: parseScore(pick("absenceScore"), "Отсутствие в очереди"),
+    tailScore: parseScore(pick("tailScore"), "Работа не сдана"),
+    drawMode: drawMode as DrawMode,
+    beta: parseRange(pick("beta"), "Сила компенсации β", 0, 10),
+    sigma: parseRange(pick("sigma"), "Разброс σ", 0.01, 10),
+  };
+}
+
+function sameSettings(a: Settings, b: Settings): boolean {
+  return (Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[]).every((key) => a[key] === b[key]);
 }
 
 function idList(value: unknown): string[] {
@@ -218,14 +274,9 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
     }
 
     case "settings.changed": {
-      const to: Settings = {
-        absenceScore: parseScore(cmd.absenceScore, "Отсутствие в очереди"),
-        tailScore: parseScore(cmd.tailScore, "Работа не сдана"),
-      };
       const from = state.settings;
-      if (from.absenceScore === to.absenceScore && from.tailScore === to.tailScore) {
-        fail("Параметры не изменились.");
-      }
+      const to = parseSettings(cmd, from);
+      if (sameSettings(from, to)) fail("Параметры не изменились.");
       return { type: cmd.type, payload: { from: { ...from }, to } };
     }
 
@@ -312,7 +363,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       const order = ([3, 2, 1] as const)
         .map((level) => participants.filter((s) => priorityLevel(state, s.id) === level))
         .filter((group) => group.length > 0)
-        .flatMap((group) => weightedShuffle(group, ctx.random));
+        .flatMap((group) => drawOrder(group, state.settings, ctx.random));
       return { type: cmd.type, payload: { sessionId: ctx.newId(), order, priority: prioritySnapshot(state) } };
     }
 
@@ -444,11 +495,9 @@ function parseImport(state: RoomState, data: any) {
     fail("В файле несколько очередей, ожидающих подведения итогов.");
   }
   const pool = idList(data.pool).filter((id) => known.has(id));
+  // Файлы без способа жеребьёвки сделаны до его появления — порядок в них считался по-старому.
   const settings: Settings = full
-    ? {
-        absenceScore: parseScore(data.settings?.absenceScore, "Отсутствие в очереди"),
-        tailScore: parseScore(data.settings?.tailScore, "Работа не сдана"),
-      }
+    ? parseSettings(data.settings, { ...DEFAULT_SETTINGS, ...LEGACY_DRAW })
     : { ...state.settings };
   return {
     students,
@@ -471,11 +520,12 @@ export function upgradeState(raw: any): RoomState {
     s.createdBy ??= null;
     delete s.shuffles;
   }
+  state.settings = { ...LEGACY_DRAW, ...state.settings };
   return state as RoomState;
 }
 
-export function createdChange(title: string, owner: { id: string; name: string }): Change {
-  return { type: "room.created", payload: { title, owner } };
+export function createdChange(title: string, owner: { id: string; name: string }, settings: Settings): Change {
+  return { type: "room.created", payload: { title, owner, settings } };
 }
 
 /** Применяет изменение к состоянию. Не меняет исходный объект. */
@@ -485,7 +535,7 @@ export function apply(prev: RoomState | null, change: Change, meta: ChangeMeta):
     return {
       title: p.title,
       createdAt: meta.createdAt,
-      settings: { ...DEFAULT_SETTINGS },
+      settings: { ...(p.settings ?? DEFAULT_SETTINGS) },
       members: [
         { id: p.owner.id, name: p.owner.name, role: "owner", active: true, addedBy: null, addedAt: meta.createdAt },
       ],

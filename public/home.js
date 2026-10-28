@@ -2,10 +2,14 @@
 
 const EXAMPLE = [
   { name: "Участник А", burden: 0 },
-  { name: "Участник Б", burden: 0.5 },
-  { name: "Участник В", burden: 1 },
-  { name: "Участник Г", burden: 2.5 },
+  { name: "Участник Б", burden: 0.25 },
+  { name: "Участник В", burden: 0.5 },
+  { name: "Участник Г", burden: 1 },
 ];
+
+/** Сила компенсации по умолчанию — как DEFAULT_SETTINGS.beta в src/domain.ts. */
+const BETA = 2.5;
+const weightOf = (burden) => Math.exp(BETA * burden);
 
 const SCORING = [
   { pos: 1, value: 0, note: "первое место" },
@@ -23,7 +27,7 @@ function pct(value) {
   return `${(value * 100).toFixed(1).replace(".", ",")} %`;
 }
 
-const totalWeight = EXAMPLE.reduce((sum, p) => sum + 1 + p.burden, 0);
+const totalWeight = EXAMPLE.reduce((sum, p) => sum + weightOf(p.burden), 0);
 
 export const HOME_SECTIONS = [
   { id: "principle", label: "Принцип работы" },
@@ -44,7 +48,7 @@ function sectionHead(index, title, lead) {
 
 export function homeSectionsHtml(joinForm) {
   const exampleRows = EXAMPLE.map((p) => {
-    const weight = 1 + p.burden;
+    const weight = weightOf(p.burden);
     const share = weight / totalWeight;
     return `<div class="trow">
       <span>${p.name}</span>
@@ -93,10 +97,10 @@ export function homeSectionsHtml(joinForm) {
         <div>
           ${sectionHead(2, "Расчёт вероятности", "У каждого участника есть вес, зависящий от накопленного приоритета. Вероятность оказаться первым пропорциональна весу.")}
           <div class="formula reveal">
-            <div><span class="muted">Вес</span><b>w = 1 + p</b></div>
+            <div><span class="muted">Вес</span><b>w = e<sup>β·p</sup></b></div>
             <div><span class="muted">Вероятность первого места</span><b>P = w / Σw</b></div>
           </div>
-          <p class="sec-note reveal">где p — накопленный приоритет участника, Σw — сумма весов всех отмеченных участников. Следующие места определяются тем же способом среди оставшихся участников.</p>
+          <p class="sec-note reveal">где p — накопленный приоритет участника, β — сила компенсации (по умолчанию 2,5), Σw — сумма весов всех отмеченных участников. Значение имеет только разница приоритетов, поэтому преимущество не ослабевает к концу семестра. Следующие места определяются тем же способом среди оставшихся участников. В настройках комнаты можно выбрать и другой способ: упорядочивание по приоритету, полностью случайный порядок или прежнюю формулу w = 1 + p.</p>
         </div>
         <div class="reveal">
           <div class="table demo-table">
@@ -200,7 +204,7 @@ function simulateFirstPlaces(runs) {
     let best = 0;
     let bestKey = Infinity;
     EXAMPLE.forEach((p, i) => {
-      const key = -Math.log(Math.max(Math.random(), Number.EPSILON)) / (1 + p.burden);
+      const key = -Math.log(Math.max(Math.random(), Number.EPSILON)) / weightOf(p.burden);
       if (key < bestKey) {
         bestKey = key;
         best = i;
