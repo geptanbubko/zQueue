@@ -1,7 +1,8 @@
 // Логика очереди. Команды пользователей проверяются в decide и превращаются в
 // изменения, которые apply применяет к снимку состояния комнаты. В неизменяемый
-// журнал попадают только изменения из LOGGED: создание комнаты, выдача и отзыв
-// доступа, создание и отмена очередей.
+// журнал попадают изменения из LOGGED — всё, что влияет на порядок и начисления.
+// Отметки «сдаёт» и уровни срочности не пишутся отдельно: они фиксируются в
+// записи о созданной очереди.
 
 export type Role = "owner" | "editor";
 export type Level = 1 | 2 | 3;
@@ -81,7 +82,23 @@ function fail(message: string, status = 400): never {
 }
 
 /** Изменения, которые записываются в журнал. */
-export const LOGGED = new Set(["room.created", "member.added", "member.revoked", "queue.created", "session.cancelled"]);
+export const LOGGED = new Set([
+  "room.created",
+  "room.renamed",
+  "room.imported",
+  "member.added",
+  "member.revoked",
+  "settings.changed",
+  "student.added",
+  "students.added",
+  "student.removed",
+  "student.renamed",
+  "student.burdenSet",
+  "queue.created",
+  "session.cancelled",
+  "session.scored",
+  "session.scoreReverted",
+]);
 
 export const DEFAULT_SETTINGS: Settings = { absenceScore: 0.5, tailScore: 1 };
 /** Метка файла экспорта комнаты. Файлы без неё — queue-data.json старой версии. */
@@ -183,7 +200,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       const to = normalizeName(cmd.title, 80);
       if (!to) fail("Введите название.");
       if (to === state.title) fail("Название не изменилось.");
-      return { type: cmd.type, payload: { to } };
+      return { type: cmd.type, payload: { from: state.title, to } };
     }
 
     case "member.added": {
@@ -209,7 +226,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       if (from.absenceScore === to.absenceScore && from.tailScore === to.tailScore) {
         fail("Параметры не изменились.");
       }
-      return { type: cmd.type, payload: { to } };
+      return { type: cmd.type, payload: { from: { ...from }, to } };
     }
 
     case "student.added": {
@@ -241,7 +258,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
 
     case "student.removed": {
       const student = findStudent(state, cmd.id) ?? fail("Участник не найден.");
-      return { type: cmd.type, payload: { id: student.id } };
+      return { type: cmd.type, payload: { id: student.id, name: student.name, burden: student.burden } };
     }
 
     case "student.renamed": {
@@ -252,14 +269,14 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       if (state.students.some((s) => s.id !== student.id && s.name.toLowerCase() === to.toLowerCase())) {
         fail("Такое имя уже есть в списке.");
       }
-      return { type: cmd.type, payload: { id: student.id, to } };
+      return { type: cmd.type, payload: { id: student.id, from: student.name, to } };
     }
 
     case "student.burdenSet": {
       const student = findStudent(state, cmd.id) ?? fail("Участник не найден.");
       const to = parseScore(cmd.burden, "Приоритет");
       if (to === student.burden) fail("Значение не изменилось.");
-      return { type: cmd.type, payload: { id: student.id, to } };
+      return { type: cmd.type, payload: { id: student.id, name: student.name, from: student.burden, to } };
     }
 
     case "pool.changed": {
@@ -338,7 +355,7 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
         return { type: "session.cancelled", payload: { sessionId: last.id } };
       }
       if (!last.increments) fail("Эту запись отменить невозможно.");
-      return { type: "session.scoreReverted", payload: { sessionId: last.id } };
+      return { type: "session.scoreReverted", payload: { sessionId: last.id, increments: { ...last.increments } } };
     }
 
     case "room.imported":

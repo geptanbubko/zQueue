@@ -141,7 +141,7 @@ async function api(path, { method = "GET", body, code } = {}) {
  * Открывает модальное окно. Возвращает значения полей и нажатую кнопку
  * ({ action, ...values }) или null, если окно закрыли.
  */
-function dialog({ title, body = "", fields = [], actions = [{ value: "ok", label: "Сохранить" }], column = false }) {
+function dialog({ title, body = "", fields = [], after = "", actions = [{ value: "ok", label: "Сохранить" }], column = false }) {
   return new Promise((resolve) => {
     const el = document.createElement("dialog");
     const fieldHtml = fields
@@ -160,6 +160,7 @@ function dialog({ title, body = "", fields = [], actions = [{ value: "ok", label
         <h2>${esc(title)}</h2>
         ${body}
         ${fieldHtml}
+        ${after}
         <div class="actions ${column ? "column" : ""}">
           ${actions
             .map((a) => `<button class="btn ${a.kind || ""}" value="${a.value}" ${a.noValidate ? "formnovalidate" : ""}>${esc(a.label)}</button>`)
@@ -336,25 +337,45 @@ function renderHome() {
 }
 
 async function createRoomDialog() {
-  const values = await dialog({
+  const pending = dialog({
     title: "Создание комнаты",
     body: `<p class="muted small" style="margin:0">Создатель комнаты управляет очередью и предоставляет доступ редакторам.</p>`,
     fields: [
-      { name: "title", label: "Дисциплина", placeholder: "Операционные системы, гр. 21-1", required: true },
+      { name: "title", label: "Дисциплина", placeholder: "Компьютерная графика", required: true },
       { name: "name", label: "Ваше имя", placeholder: "Фамилия Имя", required: true },
     ],
+    after: bulkFieldHtml("Список группы"),
     actions: [{ value: "ok", label: "Создать" }],
   });
+  const submit = document.querySelector('dialog[open] button[value="ok"]');
+  watchBulkField([], (count) => {
+    submit.textContent = count ? `Создать и добавить ${count}` : "Создать";
+  });
+  const values = await pending;
   if (!values) return;
+  const names = parseNames(values.names);
+  let data;
   try {
-    const data = await api("/api/rooms", { method: "POST", body: { title: values.title, name: values.name } });
-    setToken(data.code, data.token);
-    rememberRoom(data.code, data.state.title);
-    justCreated = data.code;
-    navigate(`/r/${data.code}`);
+    data = await api("/api/rooms", { method: "POST", body: { title: values.title, name: values.name } });
   } catch (err) {
     toast(err.message, "error");
+    return;
   }
+  setToken(data.code, data.token);
+  rememberRoom(data.code, data.state.title);
+  justCreated = data.code;
+  if (names.length) {
+    try {
+      await api(`/api/rooms/${data.code}/commands`, {
+        method: "POST",
+        body: { type: "students.added", names },
+        code: data.code,
+      });
+    } catch (err) {
+      toast(`Комната создана, но список группы не добавлен: ${err.message} Добавьте его в настройках.`, "error");
+    }
+  }
+  navigate(`/r/${data.code}`);
 }
 
 /* ---------- Комната ---------- */
@@ -887,30 +908,117 @@ function sessionCard(session, open) {
   </details>`;
 }
 
-function accessLine(text, actorId, at) {
+function logLine(text, actorId, at) {
   return `<div class="access-line">
     <span class="what">${esc(text)}</span>
     <span class="who">${actorId ? `Автор: ${esc(memberName(actorId))} · ` : ""}${esc(fmtDate(at))}</span>
   </div>`;
 }
 
-function renderHistoryTab() {
+/** Загружает журнал комнаты целиком (он только растёт, страницами по 200). */
+async function loadJournal() {
+  const current = room;
+  const seq = current.seq;
+  current.journalLoading = true;
+  try {
+    const events = [];
+    let before = "";
+    for (;;) {
+      const page = await api(`/api/rooms/${current.code}/events?limit=200${before}`);
+      events.push(...page.events);
+      if (page.events.length < 200) break;
+      before = `&before=${page.events[page.events.length - 1].seq}`;
+    }
+    current.journal = { seq, events };
+  } catch {
+    // Покажем историю по снимку; повторим, когда комната изменится.
+    current.journalFailed = seq;
+  } finally {
+    current.journalLoading = false;
+  }
+  if (room === current && room.tab === "history") renderRoom();
+}
+
+function sessionDate(id) {
+  const session = room.state.history.find((s) => s.id === id);
+  return session ? fmtDate(session.createdAt) : "—";
+}
+
+/** Текст записи журнала. null — запись показывается карточкой очереди. */
+function eventText(e) {
+  const p = e.payload;
+  const names = (list) => list.map((x) => x.name).join(", ");
+  switch (e.type) {
+    case "room.created":
+      return `Комната создана. Создатель: ${p.owner?.name ?? ""}`;
+    case "room.renamed":
+      return p.from ? `Комната переименована: «${p.from}» → «${p.to}»` : `Комната переименована: «${p.to}»`;
+    case "room.imported":
+      return `Перенесены данные из файла: ${p.students.length} ${plural(p.students.length, "участник", "участника", "участников")}, ${p.history.length} ${plural(p.history.length, "очередь", "очереди", "очередей")}. Прежний список заменён`;
+    case "member.added":
+      return `Предоставлен доступ редактора: ${p.name}`;
+    case "member.revoked":
+      return `Доступ отозван: ${p.name}`;
+    case "settings.changed": {
+      const part = (label, key) =>
+        p.from && p.from[key] === p.to[key] ? "" : `${label} ${p.from ? `${fmtNum(p.from[key])} → ` : ""}${fmtNum(p.to[key])}`;
+      return `Изменены параметры начислений: ${[part("отсутствие в очереди", "absenceScore"), part("работа не сдана", "tailScore")].filter(Boolean).join("; ")}`;
+    }
+    case "student.added":
+      return `Добавлен участник: ${p.name} (приоритет ${fmtNum(p.burden)})`;
+    case "students.added":
+      return `Добавлены участники (${p.students.length}, приоритет ${fmtNum(p.students[0]?.burden ?? 0)}): ${names(p.students)}`;
+    case "student.removed":
+      return `Удалён участник: ${p.name ?? studentName(p.id)}${typeof p.burden === "number" ? ` (приоритет ${fmtNum(p.burden)})` : ""}`;
+    case "student.renamed":
+      return `Участник переименован: ${p.from ?? ""} → ${p.to}`;
+    case "student.burdenSet":
+      return `Приоритет изменён вручную: ${p.name ?? studentName(p.id)}, ${typeof p.from === "number" ? `${fmtNum(p.from)} → ` : ""}${fmtNum(p.to)}`;
+    case "session.cancelled":
+      return `Отменена очередь от ${sessionDate(p.sessionId)}`;
+    case "session.scored":
+      return `Подведены итоги очереди от ${sessionDate(p.sessionId)}`;
+    case "session.scoreReverted":
+      return `Отменено начисление по очереди от ${sessionDate(p.sessionId)}`;
+    default:
+      return null;
+  }
+}
+
+/** История по снимку — пока журнал не загружен. */
+function snapshotItems() {
   const s = room.state;
-  const items = s.history.map((session) => ({ at: session.createdAt || "", session }));
+  const items = [];
   for (const m of s.members) {
     if (m.role === "owner") {
-      items.push({ at: s.createdAt, html: accessLine(`Комната создана. Создатель: ${m.name}`, null, s.createdAt) });
+      items.push({ at: s.createdAt, html: logLine(`Комната создана. Создатель: ${m.name}`, null, s.createdAt) });
       continue;
     }
-    items.push({ at: m.addedAt, html: accessLine(`Предоставлен доступ редактора: ${m.name}`, m.addedBy, m.addedAt) });
+    items.push({ at: m.addedAt, html: logLine(`Предоставлен доступ редактора: ${m.name}`, m.addedBy, m.addedAt) });
     if (!m.active && m.revokedAt) {
-      items.push({ at: m.revokedAt, html: accessLine(`Доступ отозван: ${m.name}`, m.revokedBy, m.revokedAt) });
+      items.push({ at: m.revokedAt, html: logLine(`Доступ отозван: ${m.name}`, m.revokedBy, m.revokedAt) });
     }
   }
-  items.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+  return items;
+}
+
+function renderHistoryTab() {
+  const s = room.state;
+  if (room.journal?.seq !== room.seq && !room.journalLoading && room.journalFailed !== room.seq) loadJournal();
+  const items = s.history.map((session) => ({ at: session.createdAt || "", order: 0, session }));
+  if (room.journal) {
+    for (const e of room.journal.events) {
+      const text = eventText(e);
+      const actor = e.type === "room.created" ? null : e.actorId;
+      if (text) items.push({ at: e.createdAt, order: e.seq, html: logLine(text, actor, e.createdAt) });
+    }
+  } else {
+    items.push(...snapshotItems());
+  }
+  items.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : b.order - a.order));
   const firstSession = items.find((item) => item.session)?.session;
   return `<section class="history">
-    <p class="muted small" style="margin:0 0 16px">Сведения о сформированных очередях и предоставлении доступа. Записи журнала не подлежат изменению.</p>
+    <p class="muted small" style="margin:0 0 16px">Журнал всех действий, влияющих на порядок очереди и начисления: состав группы, ручные изменения приоритета, параметры, очереди и их итоги, доступ. Записи журнала не подлежат изменению.</p>
     ${items.map((item) => (item.session ? sessionCard(item.session, item.session === firstSession) : item.html)).join("")}
   </section>`;
 }
@@ -1093,33 +1201,31 @@ function exportRoom() {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
-/** Делит разобранные имена на новые и уже имеющиеся в комнате. */
-function splitNew(names) {
-  const taken = new Set(room.state.students.map((st) => st.name.toLowerCase()));
+/** Делит разобранные имена на новые и уже имеющиеся в списке. */
+function splitNew(names, current = []) {
+  const taken = new Set(current.map((name) => name.toLowerCase()));
   const fresh = [];
   const existing = [];
   for (const name of names) (taken.has(name.toLowerCase()) ? existing : fresh).push(name);
   return { fresh, existing };
 }
 
-async function bulkAddDialog() {
-  const pending = dialog({
-    title: "Список группы",
-    body: `<label class="field">Вставьте список — из таблицы, документа или сообщения
-        <textarea id="bulk-names" name="names" class="input textarea" rows="8" spellcheck="false"
-          placeholder="Иванов Иван Иванович&#10;Петрова Анна Сергеевна&#10;…"></textarea>
-        <span class="field-hint">Подходит любой вид: по одному на строке, нумерованный список, строки таблицы, перечисление через запятую. Номера, заголовки, почта и пометки в скобках отбрасываются.</span>
-      </label>
-      <div id="bulk-preview" class="bulk-preview"></div>`,
-    actions: [{ value: "ok", label: "Добавить" }],
-  });
+function bulkFieldHtml(label) {
+  return `<label class="field">${esc(label)}
+      <textarea id="bulk-names" name="names" class="input textarea" rows="6" spellcheck="false"
+        placeholder="Иванов Иван Иванович&#10;Петрова Анна Сергеевна&#10;…"></textarea>
+      <span class="field-hint">Подходит любой вид: по одному на строке, нумерованный список, строки таблицы, перечисление через запятую.</span>
+    </label>
+    <div id="bulk-preview" class="bulk-preview"></div>`;
+}
+
+/** Обновляет предпросмотр списка при вводе. onChange получает число новых имён. */
+function watchBulkField(current, onChange) {
   const area = document.getElementById("bulk-names");
   const preview = document.getElementById("bulk-preview");
-  const submit = area.closest("form").querySelector('button[value="ok"]');
   const update = () => {
-    const { fresh, existing } = splitNew(parseNames(area.value));
-    submit.disabled = fresh.length === 0;
-    submit.textContent = fresh.length ? `Добавить ${fresh.length}` : "Добавить";
+    const { fresh, existing } = splitNew(parseNames(area.value), current);
+    onChange?.(fresh.length);
     if (!area.value.trim()) {
       preview.innerHTML = "";
       return;
@@ -1131,10 +1237,24 @@ async function bulkAddDialog() {
   };
   area.addEventListener("input", update);
   update();
-  area.focus();
+  return area;
+}
+
+async function bulkAddDialog() {
+  const current = room.state.students.map((st) => st.name);
+  const pending = dialog({
+    title: "Список группы",
+    body: bulkFieldHtml("Вставьте список — из таблицы, документа или сообщения"),
+    actions: [{ value: "ok", label: "Добавить" }],
+  });
+  const submit = document.querySelector('dialog[open] button[value="ok"]');
+  watchBulkField(current, (count) => {
+    submit.disabled = count === 0;
+    submit.textContent = count ? `Добавить ${count}` : "Добавить";
+  }).focus();
   const res = await pending;
   if (!res) return;
-  const { fresh } = splitNew(parseNames(res.names));
+  const { fresh } = splitNew(parseNames(res.names), current);
   if (fresh.length) {
     command({ type: "students.added", names: fresh }, `Добавлено ${fresh.length} ${plural(fresh.length, "участник", "участника", "участников")}`);
   }
