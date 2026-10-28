@@ -60,7 +60,7 @@ body {
 
 a { color: inherit; }
 
-button, input, select { font: inherit; color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
 
 h1, h2, h3 { letter-spacing: -0.02em; }
 
@@ -224,6 +224,23 @@ h1, h2, h3 { letter-spacing: -0.02em; }
 .input:focus { border-color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 10%, transparent); }
 
 .input:disabled { background: var(--subtle); color: var(--muted); }
+
+.input.textarea { height: auto; min-height: 140px; padding: 8px 12px; resize: vertical; line-height: 1.45; }
+
+.bulk-preview { display: grid; gap: 8px; }
+
+.bulk-preview:empty { display: none; }
+
+.bulk-list {
+  margin: 0;
+  padding: 6px 12px 6px 36px;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--subtle);
+  font-size: 13px;
+}
 
 label.field { display: grid; gap: 6px; font-size: 13px; font-weight: 500; color: var(--text-2); }
 

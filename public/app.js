@@ -1,4 +1,5 @@
 import { HOME_SECTIONS, homeSectionsHtml, initHome } from "./home.js";
+import { parseNames } from "./names.js";
 
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
@@ -940,6 +941,9 @@ function renderSettingsTab() {
               <input id="new-student" class="input" placeholder="Фамилия Имя Отчество" autocomplete="off" maxlength="120" required />
               <button class="btn">Добавить</button>
             </form>
+            <div class="toolbar" style="margin-top:12px">
+              <button class="btn ghost sm" data-act="bulk-add">Вставить список группы</button>
+            </div>
           </section>`
         : ""
     }
@@ -1089,6 +1093,53 @@ function exportRoom() {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+/** Делит разобранные имена на новые и уже имеющиеся в комнате. */
+function splitNew(names) {
+  const taken = new Set(room.state.students.map((st) => st.name.toLowerCase()));
+  const fresh = [];
+  const existing = [];
+  for (const name of names) (taken.has(name.toLowerCase()) ? existing : fresh).push(name);
+  return { fresh, existing };
+}
+
+async function bulkAddDialog() {
+  const pending = dialog({
+    title: "Список группы",
+    body: `<label class="field">Вставьте список — из таблицы, документа или сообщения
+        <textarea id="bulk-names" name="names" class="input textarea" rows="8" spellcheck="false"
+          placeholder="Иванов Иван Иванович&#10;Петрова Анна Сергеевна&#10;…"></textarea>
+        <span class="field-hint">Подходит любой вид: по одному на строке, нумерованный список, строки таблицы, перечисление через запятую. Номера, заголовки, почта и пометки в скобках отбрасываются.</span>
+      </label>
+      <div id="bulk-preview" class="bulk-preview"></div>`,
+    actions: [{ value: "ok", label: "Добавить" }],
+  });
+  const area = document.getElementById("bulk-names");
+  const preview = document.getElementById("bulk-preview");
+  const submit = area.closest("form").querySelector('button[value="ok"]');
+  const update = () => {
+    const { fresh, existing } = splitNew(parseNames(area.value));
+    submit.disabled = fresh.length === 0;
+    submit.textContent = fresh.length ? `Добавить ${fresh.length}` : "Добавить";
+    if (!area.value.trim()) {
+      preview.innerHTML = "";
+      return;
+    }
+    preview.innerHTML = `
+      <p class="small" style="margin:0"><b>${fresh.length ? `Будет добавлено: ${fresh.length}` : "Новых имён не найдено"}</b></p>
+      ${fresh.length ? `<ol class="bulk-list">${fresh.map((name) => `<li>${esc(name)}</li>`).join("")}</ol>` : ""}
+      ${existing.length ? `<p class="muted small" style="margin:0">Уже есть в списке: ${existing.map(esc).join(", ")}</p>` : ""}`;
+  };
+  area.addEventListener("input", update);
+  update();
+  area.focus();
+  const res = await pending;
+  if (!res) return;
+  const { fresh } = splitNew(parseNames(res.names));
+  if (fresh.length) {
+    command({ type: "students.added", names: fresh }, `Добавлено ${fresh.length} ${plural(fresh.length, "участник", "участника", "участников")}`);
+  }
+}
+
 async function importFile(file) {
   let data;
   try {
@@ -1129,6 +1180,9 @@ app.addEventListener("click", async (event) => {
       break;
     case "export":
       exportRoom();
+      break;
+    case "bulk-add":
+      bulkAddDialog();
       break;
     case "dismiss-notice":
       room.notice = null;

@@ -223,6 +223,22 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       return { type: cmd.type, payload: { id: ctx.newId(), name, burden } };
     }
 
+    case "students.added": {
+      // Пропускаем пустые имена и повторы — и внутри списка, и среди уже добавленных.
+      const taken = new Set(state.students.map((s) => s.name.toLowerCase()));
+      const names: string[] = [];
+      for (const raw of Array.isArray(cmd.names) ? cmd.names : []) {
+        const name = normalizeName(raw);
+        if (!name || taken.has(name.toLowerCase())) continue;
+        taken.add(name.toLowerCase());
+        names.push(name);
+      }
+      if (names.length === 0) fail("Нет новых имён для добавления.");
+      if (state.students.length + names.length > MAX_STUDENTS) fail("Слишком большой список.");
+      const burden = median(state.students.map((s) => s.burden));
+      return { type: cmd.type, payload: { students: names.map((name) => ({ id: ctx.newId(), name, burden })) } };
+    }
+
     case "student.removed": {
       const student = findStudent(state, cmd.id) ?? fail("Участник не найден.");
       return { type: cmd.type, payload: { id: student.id } };
@@ -496,6 +512,9 @@ export function apply(prev: RoomState | null, change: Change, meta: ChangeMeta):
       break;
     case "student.added":
       s.students.push({ id: p.id, name: p.name, burden: p.burden });
+      break;
+    case "students.added":
+      for (const x of p.students as Student[]) s.students.push({ id: x.id, name: x.name, burden: x.burden });
       break;
     case "student.removed": {
       s.students = s.students.filter((x) => x.id !== p.id);
