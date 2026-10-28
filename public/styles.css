@@ -763,7 +763,11 @@ div.field { position: relative; }
 
 .trow.thead { min-height: 34px; background: var(--subtle); font-size: 12px; font-weight: 500; color: var(--muted); }
 
-.roster .trow { grid-template-columns: 22px minmax(0, 1fr) 72px 84px 30px; }
+.roster .trow { grid-template-columns: 22px minmax(0, 1fr) 72px 104px 30px; }
+
+.roster .thead .col-chance { line-height: 1.2; }
+
+.roster .chance-note { display: block; line-height: 1.3; }
 
 .order-table .trow { grid-template-columns: 20px minmax(0, 1fr) 72px auto; }
 
@@ -1016,7 +1020,7 @@ dialog .actions.column { flex-direction: column; align-items: stretch; }
   .room-head::before { display: none; }
   .room-meta { margin-left: 0; }
   .card { padding: 16px; }
-  .roster .trow { grid-template-columns: 20px minmax(0, 1fr) 64px 30px; gap: 8px; padding: 6px 8px; }
+  .roster .trow { grid-template-columns: 20px minmax(0, 1fr) 76px 30px; gap: 8px; padding: 6px 8px; }
   .roster .col-prio { display: none; }
   .meta-mobile { display: block; margin-top: -4px; }
   .order-table .trow { grid-template-columns: 20px minmax(0, 1fr) 52px auto; gap: 8px; padding: 6px 8px; }

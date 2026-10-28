@@ -553,7 +553,9 @@ function drawKey(burden, settings, random) {
 function chanceMap() {
   const s = room.state;
   const { drawMode, beta } = s.settings;
-  const pool = s.students.filter((st) => s.pool.includes(st.id));
+  // Если никто не отмечен — считаем для всей группы, как в таблице вероятностей мест.
+  const selected = s.students.filter((st) => s.pool.includes(st.id));
+  const pool = selected.length ? selected : s.students;
   const result = {};
   // Для упорядочивания формулы нет — берём долю первых мест из моделирования.
   const simulated = drawMode === "debt" && pool.length ? placeTable().rows : null;
@@ -626,8 +628,10 @@ function placeTable() {
 function renderPlaces() {
   const { rows, total } = placeTable();
   if (!total) return "";
-  const pct = (p) => {
-    if (p <= 0) return "";
+  // Пустая клетка — место недостижимо (другой уровень срочности). Внутри своего
+  // уровня любое место возможно, даже если моделирование его не выдало.
+  const pct = (p, reachable) => {
+    if (!reachable) return "";
     const v = p * 100;
     return v < 0.5 ? "<1%" : `${Math.round(v)}%`;
   };
@@ -635,9 +639,11 @@ function renderPlaces() {
   const body = rows
     .map(({ st, level, offset, probs, mean }) => {
       const cells = Array.from({ length: total }, (_, place) => {
-        const p = place >= offset && place < offset + probs.length ? probs[place - offset] : 0;
+        const reachable = place >= offset && place < offset + probs.length;
+        const p = reachable ? probs[place - offset] : 0;
         const shade = Math.round(Math.min(1, p) * 85);
-        return `<td style="--p:${shade}%" class="${p >= 0.5 ? "hot" : ""}" title="${esc(st.name)} — ${place + 1} место: ${(p * 100).toFixed(1).replace(".", ",")} %">${pct(p)}</td>`;
+        const exact = reachable && p < 0.001 ? "<0,1" : (p * 100).toFixed(1).replace(".", ",");
+        return `<td style="--p:${shade}%" class="${p >= 0.5 ? "hot" : ""}" title="${esc(st.name)} — ${place + 1} место: ${exact} %">${pct(p, reachable)}</td>`;
       }).join("");
       const tag = room.state.urgentMode && level > 1 ? ` <span class="muted small">(${levelLabel(level)})</span>` : "";
       return `<tr><th class="name-col">${esc(st.name)}${tag}</th><td class="mean-col">${fmtNum(Math.round(mean * 10) / 10)}</td>${cells}</tr>`;
@@ -776,8 +782,8 @@ function renderQueueTab() {
       const info = chances[st.id];
       let chance = `<span class="muted">—</span>`;
       if (info) {
-        const pct = `${(info.chance * 100).toFixed(1).replace(".", ",")} %`;
-        const note = s.urgentMode && bandsUsed > 1 && level !== topLevel ? `<span class="muted small"> в группе</span>` : "";
+        const pct = info.chance > 0 && info.chance < 0.0005 ? "<0,1 %" : `${(info.chance * 100).toFixed(1).replace(".", ",")} %`;
+        const note = s.urgentMode && bandsUsed > 1 && level !== topLevel ? `<span class="muted small chance-note" title="Шанс быть первым среди участников с уровнем «${levelLabel(level)}»"> внутри уровня</span>` : "";
         chance = `${pct}${note}`;
       }
       const toggle = edit
@@ -816,12 +822,12 @@ function renderQueueTab() {
       ${
         s.students.length
           ? `<div class="table roster">
-              <div class="trow thead"><span></span><span>ФИО</span><span class="num col-prio">Приоритет</span><span class="num">Вероятность</span><span></span></div>
+              <div class="trow thead"><span></span><span>ФИО</span><span class="num col-prio">Приоритет</span><span class="num col-chance">Шанс быть первым</span><span></span></div>
               ${rows}
             </div>`
           : `<div class="empty">Список участников пуст.${edit ? " Добавьте участников на вкладке «Настройки»." : ""}</div>`
       }
-      <p class="hint">Отметьте участников, сдающих работы на текущем занятии. Вероятность — шанс оказаться первым в очереди; рассчитывается только среди отмеченных.</p>
+      <p class="hint">Отметьте участников, сдающих работы на текущем занятии. Шанс быть первым рассчитывается среди отмеченных, а если никто не отмечен — среди всей группы.</p>
     </section>
     <div class="stack sticky">
       ${renderDraw()}
