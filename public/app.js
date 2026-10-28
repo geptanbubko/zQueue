@@ -488,6 +488,84 @@ function chanceMap() {
   return { result, topLevel };
 }
 
+let placeCache = { key: "", value: null };
+
+/**
+ * Вероятность каждого места для каждого отмеченного участника (если никто не
+ * отмечен — для всех). Повторяет жеребьёвку сервера (взвешенная перетасовка
+ * внутри уровней 3 → 2 → 1) много раз с фиксированным зерном, чтобы таблица не
+ * менялась от перерисовки к перерисовке.
+ */
+function placeTable() {
+  const s = room.state;
+  const selected = s.students.filter((st) => s.pool.includes(st.id));
+  const pool = selected.length ? selected : s.students;
+  const key = JSON.stringify(pool.map((st) => [st.id, st.name, st.burden, levelOf(st.id)]));
+  if (placeCache.key === key) return placeCache.value;
+  const rows = [];
+  let seed = 0x9e3779b9;
+  const random = () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  let offset = 0;
+  for (const level of [3, 2, 1]) {
+    const band = pool.filter((st) => levelOf(st.id) === level);
+    const n = band.length;
+    if (!n) continue;
+    const weights = band.map((st) => 1 + st.burden);
+    const counts = band.map(() => new Float64Array(n));
+    const runs = n === 1 ? 1 : Math.max(2000, Math.min(20000, Math.floor(1.5e6 / n)));
+    const keys = new Float64Array(n);
+    const idx = band.map((_, i) => i);
+    for (let r = 0; r < runs; r++) {
+      for (let i = 0; i < n; i++) keys[i] = -Math.log(Math.max(random(), Number.EPSILON)) / weights[i];
+      idx.sort((a, b) => keys[a] - keys[b]);
+      for (let place = 0; place < n; place++) counts[idx[place]][place]++;
+    }
+    band.forEach((st, i) => {
+      const probs = Array.from(counts[i], (c) => c / runs);
+      const mean = probs.reduce((sum, p, place) => sum + p * (offset + place + 1), 0);
+      rows.push({ st, level, offset, probs, mean });
+    });
+    offset += n;
+  }
+  rows.sort((a, b) => a.mean - b.mean);
+  placeCache = { key, value: { rows, total: pool.length } };
+  return placeCache.value;
+}
+
+function renderPlaces() {
+  const { rows, total } = placeTable();
+  if (!total) return "";
+  const pct = (p) => {
+    if (p <= 0) return "";
+    const v = p * 100;
+    return v < 0.5 ? "<1%" : `${Math.round(v)}%`;
+  };
+  const head = Array.from({ length: total }, (_, i) => `<th>${i + 1}</th>`).join("");
+  const body = rows
+    .map(({ st, level, offset, probs, mean }) => {
+      const cells = Array.from({ length: total }, (_, place) => {
+        const p = place >= offset && place < offset + probs.length ? probs[place - offset] : 0;
+        const shade = Math.round(Math.min(1, p) * 85);
+        return `<td style="--p:${shade}%" class="${p >= 0.5 ? "hot" : ""}" title="${esc(st.name)} — ${place + 1} место: ${(p * 100).toFixed(1).replace(".", ",")} %">${pct(p)}</td>`;
+      }).join("");
+      const tag = room.state.urgentMode && level > 1 ? ` <span class="muted small">(${levelLabel(level)})</span>` : "";
+      return `<tr><th class="name-col">${esc(st.name)}${tag}</th><td class="mean-col">${fmtNum(Math.round(mean * 10) / 10)}</td>${cells}</tr>`;
+    })
+    .join("");
+  return `<section class="card places">
+    <div class="card-head"><h2>Вероятности мест</h2></div>
+    <div class="place-table-wrap" id="place-table"><table class="place-table">
+      <thead><tr><th class="name-col">Участник</th><th class="mean-col">Ср. место</th>${head}</tr></thead>
+      <tbody>${body}</tbody>
+    </table></div>
+  </section>`;
+}
+
 function awaitingSession() {
   return room.state.history.find((s) => s.status === "awaiting");
 }
@@ -514,6 +592,8 @@ function renderRoom() {
     if (input.type !== "checkbox" && input.type !== "file") kept[input.id] = input.value;
   });
   const focusedId = document.activeElement?.id;
+  const placeScroll = document.getElementById("place-table");
+  const scroll = placeScroll ? [placeScroll.scrollLeft, placeScroll.scrollTop] : null;
 
   const role = room.me?.role;
   const historyCount = s.history.length;
@@ -551,6 +631,8 @@ function renderRoom() {
     if (input) input.value = value;
   }
   if (focusedId) document.getElementById(focusedId)?.focus();
+  const places = document.getElementById("place-table");
+  if (places && scroll) [places.scrollLeft, places.scrollTop] = scroll;
 }
 
 function ownKeyLink() {
@@ -659,7 +741,8 @@ function renderQueueTab() {
       ${renderDraw()}
       ${renderScoring()}
     </div>
-  </div>`;
+  </div>
+  ${renderPlaces()}`;
 }
 
 function renderDraw() {
