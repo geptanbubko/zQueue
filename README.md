@@ -35,7 +35,8 @@ npx wrangler login
 npx wrangler d1 create queue-db
 ```
 
-Скопируйте `database_id` из вывода в `wrangler.jsonc`, затем:
+Замените `database_id` в `wrangler.jsonc` на значение из вывода (в репозитории указана база
+автора, из другого аккаунта она недоступна), затем:
 
 ```bash
 npm run db:migrate
@@ -50,3 +51,17 @@ npm run deploy
 ```bash
 npx wrangler d1 export queue-db --remote --output backup.sql
 ```
+
+В экспорте и в `queue-data.json` лежат имена участников, поэтому оба файла исключены из git.
+
+## Проверка
+
+```bash
+npm run check
+```
+
+Та же проверка типов запускается в GitHub Actions на каждый push и pull request.
+
+## Лицензия
+
+[MIT](LICENSE)
