@@ -11,6 +11,7 @@ interface Wallet {
   balance: number;
   grantsSinceSpend: number;
   nextGrantAt: number | null;
+  reserved?: Record<string, number>;
 }
 
 export type WalletState = Partial<Record<Player, Wallet>>;
@@ -26,6 +27,7 @@ function walletAt(saved: Wallet | undefined, now: number): Wallet {
   if (!grants || saved.nextGrantAt === null) return saved;
   const grantsSinceSpend = saved.grantsSinceSpend + grants;
   return {
+    ...saved,
     balance: saved.balance + HOURLY_CHIPS * grants,
     grantsSinceSpend,
     nextGrantAt: grantsSinceSpend === MAX_GRANTS_WITHOUT_SPENDING ? null : saved.nextGrantAt + grants * HOUR,
@@ -34,8 +36,13 @@ function walletAt(saved: Wallet | undefined, now: number): Wallet {
 
 export class ChipWallets {
   readonly movements: { player: Player; at: number; delta: number }[] = [];
+  private reservationsChanged = false;
 
   constructor(readonly state: WalletState) {}
+
+  get changed(): boolean {
+    return this.reservationsChanged || this.movements.length > 0;
+  }
 
   ensure(player: Player, now: number): void {
     if (this.state[player]) return;
@@ -43,7 +50,29 @@ export class ChipWallets {
   }
 
   balance(player: Player, now: number): number {
-    return walletAt(this.state[player], now).balance;
+    return walletAt(this.state[player], now).balance - this.reservedTotal(player);
+  }
+
+  reservedTotal(player: Player): number {
+    return Object.values(this.state[player]?.reserved ?? {}).reduce((total, amount) => total + amount, 0);
+  }
+
+  reserve(player: Player, roundId: string, amount: number, now: number): void {
+    if (this.balance(player, now) < amount) throw new HttpError(409, "Недостаточно доступных фишек.");
+    this.ensure(player, now);
+    const wallet = this.state[player]!;
+    wallet.reserved = { ...wallet.reserved, [roundId]: amount };
+    this.reservationsChanged = true;
+  }
+
+  release(player: Player, roundId: string): number {
+    const wallet = this.state[player];
+    const amount = wallet?.reserved?.[roundId] ?? 0;
+    if (!amount || !wallet?.reserved) return 0;
+    delete wallet.reserved[roundId];
+    if (!Object.keys(wallet.reserved).length) delete wallet.reserved;
+    this.reservationsChanged = true;
+    return amount;
   }
 
   snapshot(player: Player, from: number, now: number): { balance: number; pendingDelta: number } {
@@ -70,6 +99,7 @@ export class ChipWallets {
     if (this.balance(player, now) < amount) throw new HttpError(409, "Недостаточно фишек.");
     const wallet = this.advance(player, now);
     this.state[player] = {
+      ...wallet,
       balance: wallet.balance - amount,
       grantsSinceSpend: 0,
       nextGrantAt: wallet.nextGrantAt ?? now + HOUR,

@@ -213,6 +213,7 @@ function copyFieldHtml(value) {
 
 let room = null;
 let pollTimer = 0;
+let blackjackWatchTimer = 0;
 let justCreated = null;
 let homeCleanup = null;
 let blackjackCleanup = null;
@@ -224,6 +225,7 @@ function navigate(path) {
 
 function route() {
   clearInterval(pollTimer);
+  clearTimeout(blackjackWatchTimer);
   room = null;
   homeCleanup?.();
   homeCleanup = null;
@@ -250,7 +252,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && room) refresh().catch(() => {});
+  if (document.visibilityState === "visible" && room?.state) refresh().catch(() => {});
 });
 
 /* ---------- Стартовая страница ---------- */
@@ -418,12 +420,9 @@ async function createRoomDialog() {
 
 async function openRoom(rawCode) {
   const code = normalizeCode(rawCode);
-  let keyAdded = false;
-  if (location.hash.startsWith("#key=")) {
-    setToken(code, decodeURIComponent(location.hash.slice(5)));
-    keyAdded = true;
-    history.replaceState(null, "", `/r/${code}`);
-  } else if (location.pathname !== `/r/${code}`) {
+  const candidate = new URLSearchParams(location.hash.slice(1)).get("key");
+  const key = candidate === null ? undefined : /^[A-Za-z0-9_-]+$/.test(candidate) ? candidate : "";
+  if (key !== undefined || location.pathname !== `/r/${code}`) {
     history.replaceState(null, "", `/r/${code}`);
   }
   room = {
@@ -434,14 +433,15 @@ async function openRoom(rawCode) {
     tab: "queue",
     busy: false,
     blackjackActive: false,
-    notice: justCreated === code ? "created" : keyAdded ? "key" : null,
+    blackjackRecent: false,
+    notice: justCreated === code ? "created" : key !== undefined ? "key" : null,
   };
   justCreated = null;
   app.innerHTML = `<header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a></header>
     <div class="loading">Загрузка…</div>`;
   const current = room;
   try {
-    await refresh(true);
+    await refresh(true, key);
   } catch (err) {
     if (room !== current) return;
     if (err.status === 404) {
@@ -453,11 +453,6 @@ async function openRoom(rawCode) {
     return;
   }
   if (room !== current) return;
-  if (room?.notice === "key" && !room.me) {
-    setToken(code, null);
-    room.notice = "bad-key";
-    renderRoom();
-  }
   pollTimer = setInterval(() => {
     if (room === current && document.visibilityState === "visible" && !room.busy) refresh().catch(() => {});
   }, POLL_MS);
@@ -485,14 +480,34 @@ function renderMissing(code) {
     ${siteFooter()}`;
 }
 
-async function refresh(force = false) {
+async function refresh(force = false, candidateKey) {
   if (!room) return;
   const current = room;
-  const data = await api(`/api/rooms/${current.code}${force ? "" : `?since=${current.seq}`}`, { code: current.code });
-  if (room !== current || data.seq < current.seq) return;
+  const data = await api(`/api/rooms/${current.code}${force ? "" : `?since=${current.seq}`}`, {
+    code: current.code, token: candidateKey,
+  });
+  if (room !== current) return;
+  if (candidateKey !== undefined) {
+    if (data.me) setToken(current.code, candidateKey);
+    else {
+      current.notice = "bad-key";
+      if (getToken(current.code)) return refresh(true);
+    }
+  }
+  if (data.seq < current.seq) return;
   const active = Boolean(data.blackjackActive);
-  const bannerChanged = active !== current.blackjackActive;
+  const recent = !active && data.blackjackWatchMs > 0;
+  const bannerChanged = active !== current.blackjackActive || recent !== current.blackjackRecent;
   current.blackjackActive = active;
+  current.blackjackRecent = recent;
+  clearTimeout(blackjackWatchTimer);
+  if (recent) {
+    blackjackWatchTimer = setTimeout(() => {
+      if (room !== current) return;
+      current.blackjackRecent = false;
+      app.querySelector("#room-blackjack").innerHTML = blackjackBanner();
+    }, data.blackjackWatchMs);
+  }
   if (!data.unchanged) applyRoomData(data);
   else if (bannerChanged) app.querySelector("#room-blackjack").innerHTML = blackjackBanner();
 }
@@ -506,19 +521,22 @@ function applyRoomData(data) {
 }
 
 async function command(cmd, success) {
-  if (!room || room.busy) return null;
-  room.busy = true;
+  const current = room;
+  if (!current || current.busy) return null;
+  current.busy = true;
   try {
-    const data = await api(`/api/rooms/${room.code}/commands`, { method: "POST", body: cmd, code: room.code });
-    applyRoomData(data);
+    const data = await api(`/api/rooms/${current.code}/commands`, { method: "POST", body: cmd, code: current.code });
+    if (room !== current) return null;
+    if (data.seq >= current.seq) applyRoomData(data);
     if (success) toast(success);
     return data;
   } catch (err) {
+    if (room !== current) return null;
     toast(err.message, "error");
     if (err.status === 409 || err.status === 403) await refresh(true).catch(() => {});
     return null;
   } finally {
-    if (room) room.busy = false;
+    current.busy = false;
   }
 }
 
@@ -743,10 +761,10 @@ function delayFor(index, count, cutoff) {
 /* ----- Отрисовка ----- */
 
 function blackjackBanner() {
-  if (!room.blackjackActive) return "";
+  if (!room.blackjackActive && !room.blackjackRecent) return "";
   return `<a class="blackjack-banner" href="/r/${room.code}/blackjack" data-link>
-    <strong>Идёт игра в блэкджек</strong>
-    <span>Смотреть</span>
+    <strong>${room.blackjackActive ? "Идёт игра в блэкджек" : "Игра в блэкджек завершилась"}</strong>
+    <span class="blackjack-watch"><span class="blackjack-fire-arrow" aria-hidden="true">➜</span>Смотреть</span>
   </a>`;
 }
 
@@ -827,7 +845,8 @@ function renderNotice() {
       <button class="btn ghost sm" data-act="dismiss-notice">Закрыть</button></div>`;
   }
   if (room.notice === "bad-key") {
-    return `<div class="notice"><div class="grow"><p><b>Ссылка доступа недействительна.</b> Возможно, доступ был отозван. Комната доступна только для просмотра.</p></div>
+    const details = canEdit() ? "Используется сохранённый доступ." : "Комната доступна только для просмотра.";
+    return `<div class="notice"><div class="grow"><p><b>Ссылка доступа недействительна.</b> ${details}</p></div>
       <button class="btn ghost sm" data-act="dismiss-notice">Закрыть</button></div>`;
   }
   if (!canEdit() && !storage.read(VIEW_NOTICE_KEY, false)) {
@@ -1356,6 +1375,7 @@ function renderSettingsTab() {
 /* ----- Действия ----- */
 
 async function studentMenu(id) {
+  const current = room;
   const st = studentById(id);
   if (!st) return;
   const pick = await dialog({
@@ -1369,13 +1389,13 @@ async function studentMenu(id) {
     ],
     column: true,
   });
-  if (!pick) return;
+  if (!pick || room !== current) return;
   if (pick.action === "rename") {
     const v = await dialog({
       title: "Изменение ФИО",
       fields: [{ name: "name", label: "ФИО", value: st.name, required: true }],
     });
-    if (v) command({ type: "student.renamed", id, name: v.name }, "Изменения сохранены");
+    if (v && room === current) command({ type: "student.renamed", id, name: v.name }, "Изменения сохранены");
   } else if (pick.action === "burden") {
     const v = await dialog({
       title: "Изменение приоритета",
@@ -1384,21 +1404,21 @@ async function studentMenu(id) {
         { name: "burden", label: "Новое значение", type: "number", step: "0.01", min: 0, value: st.burden, required: true },
       ],
     });
-    if (v) command({ type: "student.burdenSet", id, burden: v.burden }, "Изменения сохранены");
+    if (v && room === current) command({ type: "student.burdenSet", id, burden: v.burden }, "Изменения сохранены");
   } else if (pick.action === "remove") {
     const v = await dialog({
       title: "Удалить участника?",
       body: `<p style="margin:0">${esc(st.name)} будет удалён из списка. В истории прошлых очередей запись сохранится.</p>`,
       actions: [{ value: "ok", label: "Удалить", kind: "danger" }],
     });
-    if (v) command({ type: "student.removed", id }, "Участник удалён");
+    if (v && room === current) command({ type: "student.removed", id }, "Участник удалён");
   }
 }
 
 async function addMember(name) {
   const data = await command({ type: "member.added", name }, null);
   if (!data?.token) return;
-  const link = `${location.origin}/r/${room.code}#key=${encodeURIComponent(data.token)}`;
+  const link = `${location.origin}/r/${data.code}#key=${encodeURIComponent(data.token)}`;
   await dialog({
     title: `Ссылка доступа: ${data.change.payload.name}`,
     body: `<p class="muted small" style="margin:0">Передайте ссылку лично. Она отображается однократно; при утере отзовите доступ и предоставьте его повторно.</p>${copyFieldHtml(link)}`,
@@ -1661,44 +1681,48 @@ function watchBulkField(current, onChange) {
 }
 
 async function bulkAddDialog() {
-  const current = room.state.students.map((st) => st.name);
+  const current = room;
+  const names = current.state.students.map((st) => st.name);
   const pending = dialog({
     title: "Список группы",
     body: bulkFieldHtml("Вставьте список — из таблицы, документа или сообщения"),
     actions: [{ value: "ok", label: "Добавить" }],
   });
   const submit = document.querySelector('dialog[open] button[value="ok"]');
-  watchBulkField(current, (count) => {
+  watchBulkField(names, (count) => {
     submit.disabled = count === 0;
     submit.textContent = count ? `Добавить ${count}` : "Добавить";
   }).focus();
   const res = await pending;
-  if (!res) return;
-  const { fresh } = splitNew(parseNames(res.names), current);
+  if (!res || room !== current) return;
+  const { fresh } = splitNew(parseNames(res.names), current.state.students.map((st) => st.name));
   if (fresh.length) {
     command({ type: "students.added", names: fresh }, `Добавлено ${fresh.length} ${plural(fresh.length, "участник", "участника", "участников")}`);
   }
 }
 
 async function importFile(file) {
+  const current = room;
   let data;
   try {
     data = JSON.parse(await file.text());
   } catch {
-    toast("Не удалось прочитать файл.", "error");
+    if (room === current) toast("Не удалось прочитать файл.", "error");
     return;
   }
+  if (room !== current) return;
   const count = Array.isArray(data?.students) ? data.students.length : 0;
   const ok = await dialog({
     title: "Перенести данные?",
     body: `<p style="margin:0">Текущий список участников и история будут заменены данными из файла (участников: ${count}).</p>`,
     actions: [{ value: "ok", label: "Перенести" }],
   });
-  if (ok) command({ type: "room.imported", data }, "Данные перенесены");
+  if (ok && room === current) command({ type: "room.imported", data }, "Данные перенесены");
 }
 
 app.addEventListener("click", async (event) => {
   if (!room?.state) return;
+  const current = room;
   const tab = event.target.closest("[data-tab]");
   if (tab) {
     room.tab = tab.getAttribute("data-tab");
@@ -1769,7 +1793,9 @@ app.addEventListener("click", async (event) => {
         }</p>`,
         actions: [{ value: "ok", label: "Подтвердить отмену", kind: "danger" }],
       });
-      if (ok) command({ type: "session.undo" }, "Действие отменено");
+      if (ok && room === current) {
+        command({ type: "session.undo", sessionId: last.id, status: last.status }, "Действие отменено");
+      }
       break;
     }
     case "tail":
@@ -1780,9 +1806,7 @@ app.addEventListener("click", async (event) => {
       break;
     case "all-done": {
       const sessionId = el.getAttribute("data-session");
-      // Сначала снимаем отметку «не успел», если она была.
-      if (awaitingSession()?.unfinishedFrom && !(await command({ type: "session.tailMarked", sessionId, from: null }))) break;
-      command({ type: "session.scored", sessionId }, "Итоги подведены: сдали все");
+      command({ type: "session.scored", sessionId, allDone: true }, "Итоги подведены: сдали все");
       break;
     }
     case "revoke": {
@@ -1792,7 +1816,7 @@ app.addEventListener("click", async (event) => {
         body: `<p style="margin:0">${esc(m?.name)} не сможет вносить изменения. Запись о предоставлении доступа сохранится.</p>`,
         actions: [{ value: "ok", label: "Отозвать", kind: "danger" }],
       });
-      if (ok) command({ type: "member.revoked", id }, "Доступ отозван");
+      if (ok && room === current) command({ type: "member.revoked", id }, "Доступ отозван");
       break;
     }
     case "forget-key": {
@@ -1801,7 +1825,7 @@ app.addEventListener("click", async (event) => {
         body: `<p style="margin:0">Ссылка доступа будет удалена из браузера. ${isOwner() ? "Без сохранённой ссылки права создателя восстановить невозможно." : "Повторный вход возможен по той же ссылке."}</p>`,
         actions: [{ value: "ok", label: "Выйти", kind: "danger" }],
       });
-      if (ok) {
+      if (ok && room === current) {
         setToken(room.code, null);
         await refresh(true);
       }
@@ -1830,12 +1854,14 @@ app.addEventListener("submit", async (event) => {
   event.preventDefault();
   const kind = form.getAttribute("data-form");
   if (kind === "add-student") {
-    const input = document.getElementById("new-student");
-    const res = await command({ type: "student.added", name: input.value });
+    const name = document.getElementById("new-student").value;
+    const res = await command({ type: "student.added", name });
     if (res) {
       const fresh = document.getElementById("new-student");
-      fresh.value = "";
-      fresh.focus();
+      if (fresh?.value === name) {
+        fresh.value = "";
+        fresh.focus();
+      }
     }
   } else if (kind === "add-member") {
     const input = document.getElementById("new-member");

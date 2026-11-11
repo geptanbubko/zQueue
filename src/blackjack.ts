@@ -36,6 +36,7 @@ interface Round {
   turn: { index: number; step: number; deadline: number } | null;
   insurance?: DecisionWindow;
   finishedAt?: number;
+  settled?: true;
 }
 
 export interface Table {
@@ -43,6 +44,10 @@ export interface Table {
   betting?: DecisionWindow & { id: string };
   round: Round | null;
   messages: { id: string; author: string; text: string }[];
+}
+
+export function playerForToken(table: Table, tokenHash: string): Player | null {
+  return table.seats.find((seat) => seat.tokenHash === tokenHash)?.name ?? null;
 }
 
 function seatPositions(seats: Table["seats"]): (Player | null)[] {
@@ -168,7 +173,6 @@ export function setBet(
   if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount < 0 || amount % BET_STEP !== 0) {
     throw new HttpError(400, "Ставка должна быть кратна 100 фишкам.");
   }
-  if (amount > wallets.balance(player, now)) throw new HttpError(409, "Недостаточно фишек.");
   if (!table.betting) {
     if (!amount) throw new HttpError(409, "Приём ставок ещё не начался.");
     table.betting = {
@@ -177,6 +181,7 @@ export function setBet(
     };
   }
   if (table.betting.decisions[player] !== null) throw new HttpError(409, "Ваш ответ уже принят или вы подключитесь к следующей раздаче.");
+  if (amount) wallets.reserve(player, table.betting.id, amount, now);
   table.betting.decisions[player] = amount;
   if (!hasDecisionsLeft(table.betting)) dealRound(table, now, wallets);
 }
@@ -188,7 +193,8 @@ function dealRound(table: Table, at: number, wallets: ChipWallets, chargedAt = a
   const hands: Hand[] = [];
   for (const name of seatPositions(table.seats)) {
     if (!name) continue;
-    const bet = betting.decisions[name] ?? 0;
+    // Bets from windows opened by the old version may have no reservation.
+    const bet = wallets.release(name, betting.id) || (betting.decisions[name] ?? 0);
     if (!bet || bet > wallets.balance(name, chargedAt)) continue;
     wallets.spend(name, bet, chargedAt);
     hands.push({ name, bet, cards: [], status: "playing" });
@@ -239,6 +245,7 @@ export function chooseInsurance(
 export function leaveSeat(table: Table, player: Player, now: number, wallets: ChipWallets): void {
   table.seats = table.seats.filter(({ name }) => name !== player);
   if (table.betting) {
+    wallets.release(player, table.betting.id);
     delete table.betting.decisions[player];
     if (!hasDecisionsLeft(table.betting)) dealRound(table, now, wallets);
     return;
@@ -315,17 +322,23 @@ export interface ChipResult {
   lost: number;
 }
 
-export function settleRound(round: Round, wallets: ChipWallets, now: number): ChipResult[] {
-  if (roundActive(round) || round.finishedAt === undefined) return [];
+function handPayout(hand: Hand, dealerBlackjack: boolean) {
+  const bet = hand.bet ?? 0;
+  const payout = hand.result === "blackjack" ? bet * 2.5 :
+    hand.result === "win" ? bet * 2 : hand.result === "push" ? bet : 0;
+  const insurance = hand.insuranceBet ?? 0;
+  return { payout, insurancePayout: dealerBlackjack ? insurance * 3 : 0 };
+}
+
+export function settleRound(round: Round, wallets: ChipWallets, now: number, alreadyPaid?: ReadonlySet<Player>): ChipResult[] {
+  if (roundActive(round) || round.finishedAt === undefined || round.settled) return [];
   const dealerBlackjack = round.dealer.length === 2 && handValue(round.dealer).score === 21;
   const totals = new Map<Player, ChipResult>();
   for (const hand of round.hands) {
     const bet = hand.bet ?? 0;
-    if (!bet) continue;
-    const payout = hand.result === "blackjack" ? bet * 2.5 :
-      hand.result === "win" ? bet * 2 : hand.result === "push" ? bet : 0;
+    if (!bet || alreadyPaid?.has(hand.name)) continue;
+    const { payout, insurancePayout } = handPayout(hand, dealerBlackjack);
     const insurance = hand.insuranceBet ?? 0;
-    const insurancePayout = dealerBlackjack ? insurance * 3 : 0;
     if (payout || insurancePayout) wallets.credit(hand.name, payout + insurancePayout, now);
     const total = totals.get(hand.name) ?? {
       roundId: round.id, player: hand.name, settledAt: round.finishedAt, won: 0, lost: 0,
@@ -334,6 +347,7 @@ export function settleRound(round: Round, wallets: ChipWallets, now: number): Ch
     total.lost += Math.max(0, bet - payout) + Math.max(0, insurance - insurancePayout);
     totals.set(hand.name, total);
   }
+  round.settled = true;
   return [...totals.values()];
 }
 
@@ -343,6 +357,7 @@ export function tableView(table: Table, me: Player | null, balance: number, stat
   const round = table.round;
   const seats = table.seats.map(({ name }) => name);
   const insurance = round?.insurance;
+  const dealerBlackjack = Boolean(round?.settled && round.dealer.length === 2 && handValue(round.dealer).score === 21);
   const insuranceCost = insurance && me && insurance.decisions[me] === null
     ? (round.hands.find(({ name }) => name === me)?.bet ?? 0) / 2 : null;
   return {
@@ -360,7 +375,10 @@ export function tableView(table: Table, me: Player | null, balance: number, stat
       id: round.id,
       dealer: roundActive(round) ? [round.dealer[0], null] : round.dealer,
       dealerScore: handValue(roundActive(round) ? round.dealer.slice(0, 1) : round.dealer).score,
-      hands: round.hands.map((hand) => ({ ...hand, ...handValue(hand.cards) })),
+      hands: round.hands.map((hand) => ({
+        ...hand, ...handValue(hand.cards),
+        ...(round.settled ? handPayout(hand, dealerBlackjack) : {}),
+      })),
       insurance: insurance ? { ...insurance, cost: insuranceCost } : null,
       turn: round.turn && {
         name: round.hands[round.turn.index].name,

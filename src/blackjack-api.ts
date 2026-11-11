@@ -1,4 +1,4 @@
-import { chooseInsurance, leaveSeat, PLAYERS, playTurn, seatPlayer, setBet, tableActive, type Table } from "./blackjack";
+import { chooseInsurance, leaveSeat, playerForToken, PLAYERS, playTurn, seatPlayer, setBet, tableActive } from "./blackjack";
 import { uploadBlackjackAvatar } from "./blackjack-avatars";
 import { readTableView, updateTable } from "./blackjack-store";
 import { bearerToken, HttpError, json, randomToken, readJson, sha256 } from "./http";
@@ -8,14 +8,20 @@ export type BlackjackEnv = Env & {
   BLACKJACK_PASSWORDS?: string;
 };
 
+const WATCH_GRACE_MS = 5 * 60 * 1000;
+
 export function blackjackConfigured(env: BlackjackEnv): boolean {
   return Boolean(env.BLACKJACK_ENTRY_KEY && env.BLACKJACK_PASSWORDS);
 }
 
-export async function blackjackActive(env: BlackjackEnv, roomId: string): Promise<boolean> {
-  if (!blackjackConfigured(env)) return false;
-  const table = await updateTable(env.DB, roomId, { onlyPlaying: true });
-  return tableActive(table);
+export async function blackjackWatchState(env: BlackjackEnv, roomId: string) {
+  if (!blackjackConfigured(env)) return { blackjackActive: false, blackjackWatchMs: 0 };
+  const table = await updateTable(env.DB, roomId, { watchSince: Date.now() - WATCH_GRACE_MS });
+  const blackjackActive = tableActive(table);
+  const finishedAt = table.round?.finishedAt;
+  const blackjackWatchMs = blackjackActive || finishedAt === undefined
+    ? 0 : Math.max(0, finishedAt + WATCH_GRACE_MS - Date.now());
+  return { blackjackActive, blackjackWatchMs };
 }
 
 function sameHash(left: string, right: string): boolean {
@@ -54,10 +60,10 @@ export async function handleBlackjack(
   if (!blackjackConfigured(env)) throw new HttpError(404, "Стол недоступен.");
   const token = bearerToken(req);
   const tokenHash = token ? await sha256(token) : "";
-  const playerAt = (table: Table) => table.seats.find((seat) => seat.tokenHash === tokenHash)?.name ?? null;
-  const respond = async (table: Table) => json(await readTableView(env.DB, table, playerAt(table)));
+  const respond = async () => json(await readTableView(env.DB, roomId, tokenHash));
   if (req.method === "GET" && action === "") {
-    return respond(await updateTable(env.DB, roomId));
+    await updateTable(env.DB, roomId);
+    return respond();
   }
   if (req.method === "PUT" && action === "avatar") {
     return uploadBlackjackAvatar(env.DB, req, roomId, tokenHash);
@@ -71,7 +77,8 @@ export async function handleBlackjack(
 
   if (action === "access") {
     await verifyEntry(env, body?.key);
-    return respond(await updateTable(env.DB, roomId));
+    await updateTable(env.DB, roomId);
+    return respond();
   }
   if (action === "join") {
     await verifyEntry(env, body?.key);
@@ -89,13 +96,13 @@ export async function handleBlackjack(
     if (!player) throw new HttpError(403, "Неверный пароль игрока.");
     const session = randomToken();
     const sessionHash = await sha256(session);
-    const table = await updateTable(env.DB, roomId, {
+    await updateTable(env.DB, roomId, {
       change(table, now, wallets) {
         wallets.ensure(player, now);
         seatPlayer(table, player, sessionHash);
       },
     });
-    return json({ ...await readTableView(env.DB, table, player), token: session });
+    return json({ ...await readTableView(env.DB, roomId, sessionHash), token: session });
   }
   if (action === "chat") {
     const message = typeof body?.text === "string" ? body.text.trim() : "";
@@ -103,22 +110,22 @@ export async function handleBlackjack(
     if (!(await env.BLACKJACK_CHAT_LIMIT.limit({ key: source })).success) {
       throw new HttpError(429, "Сообщения отправляются слишком часто.");
     }
-    const table = await updateTable(env.DB, roomId, {
+    await updateTable(env.DB, roomId, {
       change(table) {
-        table.messages.push({ id: crypto.randomUUID(), author: playerAt(table) ?? "Зритель", text: message });
+        table.messages.push({ id: crypto.randomUUID(), author: playerForToken(table, tokenHash) ?? "Зритель", text: message });
         table.messages = table.messages.slice(-50);
       },
     });
-    return respond(table);
+    return respond();
   }
 
   if (action !== "bet" && action !== "insurance" && action !== "hit" && action !== "stand" &&
       action !== "double" && action !== "split" && action !== "leave") {
     throw new HttpError(404, "Не найдено.");
   }
-  const table = await updateTable(env.DB, roomId, {
+  await updateTable(env.DB, roomId, {
     change(table, now, wallets) {
-      const player = playerAt(table);
+      const player = playerForToken(table, tokenHash);
       if (!player) throw new HttpError(403, "Войдите за стол.");
       if (action === "bet") setBet(table, player, body?.amount, body?.roundId, body?.bettingId, now, wallets);
       else if (action === "insurance") chooseInsurance(table, player, body?.accept, body?.roundId, now, wallets);
@@ -126,5 +133,5 @@ export async function handleBlackjack(
       else playTurn(table, player, action, body?.roundId, body?.step, now, wallets);
     },
   });
-  return respond(table);
+  return respond();
 }

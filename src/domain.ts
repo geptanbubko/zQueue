@@ -380,7 +380,8 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       const session = state.history.find((s) => s.id === cmd.sessionId);
       if (!session || session.status !== "awaiting") fail("Итоги этой очереди уже подведены.");
       const order = session.order;
-      const cutoff = session.unfinishedFrom ? order.indexOf(session.unfinishedFrom) : -1;
+      const allDone = cmd.allDone === true;
+      const cutoff = !allDone && session.unfinishedFrom ? order.indexOf(session.unfinishedFrom) : -1;
       const increments: Record<string, number> = {};
       const inOrder = new Set(order);
       const absent: string[] = [];
@@ -395,13 +396,20 @@ export function decide(state: RoomState, cmd: any, actor: Member, ctx: DecideCon
       }
       return {
         type: cmd.type,
-        payload: { sessionId: session.id, increments, absent, unfinished: cutoff >= 0 ? order.slice(cutoff) : [] },
+        payload: {
+          sessionId: session.id, increments, absent, unfinished: cutoff >= 0 ? order.slice(cutoff) : [],
+          ...(allDone ? { allDone } : {}),
+        },
       };
     }
 
     case "session.undo": {
       // Отменённые очереди остаются в истории, но отменять их повторно нельзя.
       const last = state.history.find((s) => s.status !== "cancelled") ?? fail("Нет действий для отмены.");
+      if ((cmd.sessionId !== undefined && cmd.sessionId !== last.id) ||
+          (cmd.status !== undefined && cmd.status !== last.status)) {
+        fail("Очередь уже изменилась. Проверьте её и повторите действие.", 409);
+      }
       if (last.status === "awaiting") {
         return { type: "session.cancelled", payload: { sessionId: last.id } };
       }
@@ -668,6 +676,7 @@ export function apply(prev: RoomState | null, change: Change, meta: ChangeMeta):
       target.increments = { ...p.increments };
       target.absent = [...p.absent];
       target.unfinished = [...p.unfinished];
+      if (p.allDone) target.unfinishedFrom = null;
       target.status = "scored";
       break;
     }

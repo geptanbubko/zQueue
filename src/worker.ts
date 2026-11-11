@@ -11,7 +11,7 @@ import {
   type RoomState,
   upgradeState,
 } from "./domain";
-import { blackjackActive, blackjackConfigured, handleBlackjack, type BlackjackEnv } from "./blackjack-api";
+import { blackjackConfigured, blackjackWatchState, handleBlackjack, type BlackjackEnv } from "./blackjack-api";
 import { getBlackjackAvatar } from "./blackjack-avatars";
 import { bearerToken, HttpError, json, randomToken, readJson, secureRandom, sha256 } from "./http";
 
@@ -106,11 +106,11 @@ async function createRoom(env: Env, req: Request): Promise<Response> {
 async function getRoom(env: BlackjackEnv, req: Request, code: string, url: URL): Promise<Response> {
   const room = await loadRoom(env, code);
   const since = Number(url.searchParams.get("since"));
-  const active = await blackjackActive(env, room.id);
-  if (since === room.seq) return json({ code: room.code, seq: room.seq, unchanged: true, blackjackActive: active });
+  const watch = await blackjackWatchState(env, room.id);
+  if (since === room.seq) return json({ code: room.code, seq: room.seq, unchanged: true, ...watch });
   const state = upgradeState(JSON.parse(room.state));
   const me = await currentMember(env, req, room, state);
-  return json({ code: room.code, seq: room.seq, state, me, blackjackActive: active });
+  return json({ code: room.code, seq: room.seq, state, me, ...watch });
 }
 
 async function runCommand(env: Env, req: Request, code: string): Promise<Response> {
@@ -152,7 +152,7 @@ async function runCommand(env: Env, req: Request, code: string): Promise<Respons
 async function listEvents(env: Env, code: string, url: URL): Promise<Response> {
   const room = await loadRoom(env, code);
   const before = Number(url.searchParams.get("before")) || Number.MAX_SAFE_INTEGER;
-  const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 200);
+  const limit = Math.min(Math.max(Math.trunc(Number(url.searchParams.get("limit")) || 50), 1), 200);
   const { results } = await env.DB.prepare(
     "SELECT seq, type, payload, actor_id, created_at FROM events WHERE room_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?",
   )

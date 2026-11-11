@@ -52,7 +52,6 @@ async function avatarPng(file) {
 
 function tableHtml({ round, betting, positions, avatars }, esc) {
   if (betting) round = null;
-  const hands = round?.hands ?? [];
   const turn = round?.turn;
   const insurance = round?.insurance;
   const phase = betting ?? insurance;
@@ -61,6 +60,28 @@ function tableHtml({ round, betting, positions, avatars }, esc) {
     turn ? `Ходит ${esc(turn.name)}` : round ? "Раунд завершён" : "Ожидание первой ставки";
   const hideDealerCard = Boolean(turn || insurance);
   const dealerBlackjack = round && !hideDealerCard && round.dealer.length === 2 && round.dealerScore === 21;
+  const handsByPlayer = new Map();
+  for (const [index, hand] of (round?.hands ?? []).entries()) {
+    if (!handsByPlayer.has(hand.name)) handsByPlayer.set(hand.name, []);
+    handsByPlayer.get(hand.name).push({ hand, index });
+  }
+  const departed = [...handsByPlayer].filter(([name]) => !positions.includes(name));
+  function renderHands(hands) {
+    return hands.map(({ hand, index }, number) => `
+      <div class="blackjack-hand${turn?.index === index ? " current-hand" : ""}">
+        <div class="blackjack-hand-score">
+          ${hands.length > 1 ? `Рука ${number + 1} · ` : ""}
+          <abbr title="${hand.soft ? "Мягкая рука" : "Жёсткая рука"}">${hand.score}${hand.soft ? "s" : "h"}</abbr>
+          ${hands.length > 1 && hand.bet ? ` · ${chips.format(hand.bet)}` : ""}
+        </div>
+        <div class="blackjack-cards">${cardsHtml(hand.cards, esc)}</div>
+        <p>${RESULT_LABELS[hand.result] ?? HAND_LABELS[hand.status]}</p>
+        ${hand.insuranceBet ? `<p>${insurance ? "Застраховано" : dealerBlackjack ? "Страховка сыграла" : "Страховка проиграла"}</p>` : ""}
+        ${hand.payout || hand.insurancePayout
+          ? `<p class="blackjack-hand-payout">Зачислено +${chips.format(hand.payout + hand.insurancePayout)}</p>` : ""}
+      </div>`).join("");
+  }
+
   return `
     <div class="blackjack-table-status">
       <div role="status"><strong>${status}</strong>
@@ -80,7 +101,7 @@ function tableHtml({ round, betting, positions, avatars }, esc) {
     <div class="blackjack-seats" aria-label="Места за столом">
       ${positions.map((name) => {
         if (!name) return '<div class="blackjack-seat empty-seat">Свободное место</div>';
-        const playerHands = hands.map((hand, index) => ({ hand, index })).filter(({ hand }) => hand.name === name);
+        const playerHands = handsByPlayer.get(name) ?? [];
         const bet = betting?.decisions[name];
         const totalBet = bet || playerHands.reduce((total, { hand }) => total + (hand.bet ?? 0), 0);
         const decision = bet === null ? "Выбирает ставку" : bet === 0 ? "Пропуск" :
@@ -92,21 +113,22 @@ function tableHtml({ round, betting, positions, avatars }, esc) {
               <h3 title="${esc(name)}">${esc(name)}</h3>
               ${totalBet ? `<span class="blackjack-seat-bet" title="Ставка ${chips.format(totalBet)}">${chips.format(totalBet)}</span>` : ""}
             </div>
-            ${playerHands.map(({ hand, index }, number) => `
-              <div class="blackjack-hand${turn?.index === index ? " current-hand" : ""}">
-                <div class="blackjack-hand-score">
-                  ${playerHands.length > 1 ? `Рука ${number + 1} · ` : ""}
-                  <abbr title="${hand.soft ? "Мягкая рука" : "Жёсткая рука"}">${hand.score}${hand.soft ? "s" : "h"}</abbr>
-                  ${playerHands.length > 1 && hand.bet ? ` · ${chips.format(hand.bet)}` : ""}
-                </div>
-                <div class="blackjack-cards">${cardsHtml(hand.cards, esc)}</div>
-                <p>${RESULT_LABELS[hand.result] ?? HAND_LABELS[hand.status]}</p>
-                ${hand.insuranceBet ? `<p>${insurance ? "Застраховано" : dealerBlackjack ? "Страховка сыграла" : "Страховка проиграла"}</p>` : ""}
-              </div>`).join("")}
+            ${renderHands(playerHands)}
             ${!playerHands.length && !bet ? `<p>${decision}</p>` : ""}
           </section>`;
       }).join("")}
-    </div>`;
+    </div>
+    ${departed.length ? `
+      <section class="blackjack-departed" aria-labelledby="blackjack-departed-title">
+        <h2 id="blackjack-departed-title">Руки вышедших игроков</h2>
+        <div class="blackjack-departed-grid">
+          ${departed.map(([name, playerHands]) => `
+            <section class="blackjack-departed-player">
+              <h3>${esc(name)}</h3>
+              ${renderHands(playerHands)}
+            </section>`).join("")}
+        </div>
+      </section>` : ""}`;
 }
 
 function animateCards(container, cards, previous, delay = 0) {
@@ -166,6 +188,7 @@ function playerControls(data, esc, uploadingAvatar) {
       <div class="blackjack-player-profile">
         ${avatarHtml(me, data.avatars[me], esc)}
         <strong>${esc(me)}</strong><span>Chips ${chips.format(balance)}</span>
+        ${data.reserved ? `<span>Reserved ${chips.format(data.reserved)}</span>` : ""}
         <button type="button" class="btn ghost blackjack-avatar-upload" data-avatar-upload ${uploadingAvatar ? "disabled" : ""}>
           ${uploadingAvatar ? "Uploading…" : "Upload avatar"}
         </button>
@@ -233,6 +256,7 @@ export function openBlackjack({ app, api, esc, toast, logo, code, joining }) {
   let active = true;
   let syncing = false;
   let busy = false;
+  let sendingMessage = false;
   let uploadingAvatar = false;
   let requests = 0;
   let timer;
@@ -307,6 +331,7 @@ export function openBlackjack({ app, api, esc, toast, logo, code, joining }) {
   }
 
   function render(data) {
+    if (state && (data.tableRevision < state.tableRevision || data.walletRevision < state.walletRevision)) return;
     const previous = state;
     state = data;
     receivedAt = performance.now();
@@ -382,6 +407,7 @@ export function openBlackjack({ app, api, esc, toast, logo, code, joining }) {
     if (busy) return false;
     busy = true;
     requests++;
+    let refresh = false;
     try {
       const data = await api(`${endpoint}/${action}`, { method: "POST", body, token });
       if (!active) return false;
@@ -390,9 +416,11 @@ export function openBlackjack({ app, api, esc, toast, logo, code, joining }) {
       return true;
     } catch (error) {
       if (active) toast(error.message, "error");
+      refresh = error.status === 409 || error.status === 403;
       return false;
     } finally {
       busy = false;
+      if (refresh && active) sync();
     }
   }
 
@@ -463,9 +491,21 @@ export function openBlackjack({ app, api, esc, toast, logo, code, joining }) {
   });
   chatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (sendingMessage) return;
     const input = chatForm.elements.text;
     const text = input.value;
-    if (await send("chat", { text }) && input.value === text) input.value = "";
+    sendingMessage = true;
+    try {
+      await api(`${endpoint}/chat`, { method: "POST", body: { text }, token });
+      if (active) {
+        if (input.value === text) input.value = "";
+        sync();
+      }
+    } catch (error) {
+      if (active) toast(error.message, "error");
+    } finally {
+      sendingMessage = false;
+    }
   });
 
   async function load() {
