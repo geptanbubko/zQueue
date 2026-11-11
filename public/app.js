@@ -1,6 +1,7 @@
 import { HOME_SECTIONS, homeSectionsHtml, initHome } from "./home.js";
 import { parseNames } from "./names.js";
 import { canvasBlob, placesImage, queueImage } from "./share.js";
+import { openBlackjack } from "./blackjack.js";
 
 const app = document.getElementById("app");
 const toastEl = document.getElementById("toast");
@@ -134,14 +135,14 @@ async function copyText(text) {
   toast("Скопировано");
 }
 
-async function api(path, { method = "GET", body, code } = {}) {
+async function api(path, { method = "GET", body, code, token = code ? getToken(code) : null } = {}) {
   const headers = {};
-  const token = code ? getToken(code) : null;
   if (token) headers.Authorization = `Bearer ${token}`;
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const isBlob = body instanceof Blob;
+  if (body !== undefined) headers["Content-Type"] = isBlob ? body.type : "application/json";
   let res;
   try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    res = await fetch(path, { method, headers, body: isBlob ? body : JSON.stringify(body) });
   } catch {
     throw Object.assign(new Error("Нет связи с сервером."), { status: 0 });
   }
@@ -214,6 +215,7 @@ let room = null;
 let pollTimer = 0;
 let justCreated = null;
 let homeCleanup = null;
+let blackjackCleanup = null;
 
 function navigate(path) {
   history.pushState(null, "", path);
@@ -225,9 +227,16 @@ function route() {
   room = null;
   homeCleanup?.();
   homeCleanup = null;
+  blackjackCleanup?.();
+  blackjackCleanup = null;
   const match = location.pathname.match(/^\/r\/([A-Za-z0-9-]+)\/?$/);
+  const blackjack = location.pathname.match(/^\/r\/([A-Za-z0-9-]+)\/blackjack(\/join)?\/?$/);
   if (match) openRoom(match[1]);
-  else renderHome();
+  else if (blackjack) {
+    blackjackCleanup = openBlackjack({
+      app, api, esc, toast, logo: ICONS.logo, code: normalizeCode(blackjack[1]), joining: Boolean(blackjack[2]),
+    });
+  } else renderHome();
   window.scrollTo(0, 0);
 }
 
@@ -241,7 +250,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && room) refresh();
+  if (document.visibilityState === "visible" && room) refresh().catch(() => {});
 });
 
 /* ---------- Стартовая страница ---------- */
@@ -424,14 +433,17 @@ async function openRoom(rawCode) {
     me: null,
     tab: "queue",
     busy: false,
+    blackjackActive: false,
     notice: justCreated === code ? "created" : keyAdded ? "key" : null,
   };
   justCreated = null;
   app.innerHTML = `<header class="topbar"><a href="/" data-link class="brand">${ICONS.logo}<span>zQueue</span></a></header>
     <div class="loading">Загрузка…</div>`;
+  const current = room;
   try {
     await refresh(true);
   } catch (err) {
+    if (room !== current) return;
     if (err.status === 404) {
       forgetRoom(code);
       renderMissing(code);
@@ -440,12 +452,12 @@ async function openRoom(rawCode) {
     }
     return;
   }
+  if (room !== current) return;
   if (room?.notice === "key" && !room.me) {
     setToken(code, null);
     room.notice = "bad-key";
     renderRoom();
   }
-  const current = room;
   pollTimer = setInterval(() => {
     if (room === current && document.visibilityState === "visible" && !room.busy) refresh().catch(() => {});
   }, POLL_MS);
@@ -477,8 +489,12 @@ async function refresh(force = false) {
   if (!room) return;
   const current = room;
   const data = await api(`/api/rooms/${current.code}${force ? "" : `?since=${current.seq}`}`, { code: current.code });
-  if (room !== current || data.unchanged) return;
-  applyRoomData(data);
+  if (room !== current || data.seq < current.seq) return;
+  const active = Boolean(data.blackjackActive);
+  const bannerChanged = active !== current.blackjackActive;
+  current.blackjackActive = active;
+  if (!data.unchanged) applyRoomData(data);
+  else if (bannerChanged) app.querySelector("#room-blackjack").innerHTML = blackjackBanner();
 }
 
 function applyRoomData(data) {
@@ -726,6 +742,14 @@ function delayFor(index, count, cutoff) {
 
 /* ----- Отрисовка ----- */
 
+function blackjackBanner() {
+  if (!room.blackjackActive) return "";
+  return `<a class="blackjack-banner" href="/r/${room.code}/blackjack" data-link>
+    <strong>Идёт игра в блэкджек</strong>
+    <span>Смотреть</span>
+  </a>`;
+}
+
 function renderRoom() {
   if (!room?.state) return;
   const s = room.state;
@@ -760,6 +784,7 @@ function renderRoom() {
       </div>
     </header>
     <main class="container">
+      <div id="room-blackjack" aria-live="polite">${blackjackBanner()}</div>
       ${renderNotice()}
       <nav class="tabs" role="tablist">
         ${tabs
