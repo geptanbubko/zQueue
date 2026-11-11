@@ -426,8 +426,21 @@ function cleanPriority(raw: any, known: Set<string>): Record<string, number> {
   return out;
 }
 
+// Идентификаторы попадают в HTML-атрибуты и ключи объектов, поэтому из файла
+// принимаются только безопасные символы (UUID, числа, slug-строки).
+const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
 function validId(value: unknown): value is string {
-  return typeof value === "string" && value.length > 0 && value.length <= 64;
+  return typeof value === "string" && ID_PATTERN.test(value);
+}
+
+function importedIds(value: unknown, limit = MAX_STUDENTS): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter(validId))].slice(0, limit);
+}
+
+function importedDate(value: unknown): string {
+  return typeof value === "string" && value.length <= 40 && !Number.isNaN(Date.parse(value)) ? value : "";
 }
 
 /**
@@ -444,21 +457,28 @@ function parseImport(state: RoomState, data: any) {
   const students: Student[] = data.students.map((s: any) => {
     const name = normalizeName(s?.name);
     const burden = Number(s?.burden);
-    if (!validId(s?.id) || !name || !Number.isFinite(burden) || burden < 0) {
+    if (!validId(s?.id) || !name || !Number.isFinite(burden) || burden < 0 || burden > 1e6) {
       fail("В файле есть некорректная запись о студенте.");
     }
     return { id: s.id, name, burden };
   });
   const known = new Set(students.map((s) => s.id));
+  if (known.size !== students.length) fail("В файле повторяются идентификаторы студентов.");
+  const sessionIds = new Set<string>();
   // Редакторы в новой комнате другие, поэтому авторство сохраняется, только если
   // автор — участник этой комнаты.
   const memberIds = new Set(state.members.map((m) => m.id));
   const author = (id: unknown) => (typeof id === "string" && memberIds.has(id) ? id : null);
   const history: Session[] = data.history.slice(0, 500).map((h: any) => {
-    if (!validId(h?.id) || !Array.isArray(h.order)) fail("В файле есть некорректная запись истории.");
-    const priority = cleanPriority(h.priority, new Set(idList(h.order)));
+    if (!validId(h?.id) || !Array.isArray(h.order) || sessionIds.has(h.id)) {
+      fail("В файле есть некорректная запись истории.");
+    }
+    sessionIds.add(h.id);
+    const order = importedIds(h.order);
+    const inOrder = new Set(order);
+    const priority = cleanPriority(h.priority, inOrder);
     if (Object.keys(priority).length === 0) {
-      for (const id of idList(h.urgent)) priority[id] = 3;
+      for (const id of importedIds(h.urgent)) if (inOrder.has(id)) priority[id] = 3;
     }
     let status: Session["status"] = h.awaitingScore ? "awaiting" : "scored";
     if (full) {
@@ -469,25 +489,27 @@ function parseImport(state: RoomState, data: any) {
     }
     const session: Session = {
       id: h.id,
-      createdAt: typeof h.createdAt === "string" ? h.createdAt : "",
+      createdAt: importedDate(h.createdAt),
       createdBy: full ? author(h.createdBy) : null,
-      order: idList(h.order),
+      order,
       priority,
-      unfinishedFrom: status !== "cancelled" && typeof h.unfinishedFrom === "string" ? h.unfinishedFrom : null,
+      unfinishedFrom: status !== "cancelled" && inOrder.has(h.unfinishedFrom) ? h.unfinishedFrom : null,
       status,
     };
     if (status === "cancelled") {
-      session.cancelledAt = typeof h.cancelledAt === "string" ? h.cancelledAt : "";
+      session.cancelledAt = importedDate(h.cancelledAt);
       session.cancelledBy = author(h.cancelledBy);
     }
     if (session.status === "scored") {
-      if (h.increments && typeof h.increments === "object") {
+      if (h.increments && typeof h.increments === "object" && !Array.isArray(h.increments)) {
         session.increments = Object.fromEntries(
-          Object.entries(h.increments).filter(([, v]) => typeof v === "number"),
+          Object.entries(h.increments)
+            .filter(([id, v]) => validId(id) && typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 1e6)
+            .slice(0, MAX_STUDENTS),
         ) as Record<string, number>;
       }
-      session.absent = idList(h.absent);
-      session.unfinished = idList(h.unfinished);
+      session.absent = importedIds(h.absent);
+      session.unfinished = importedIds(h.unfinished).filter((id) => inOrder.has(id));
     }
     return session;
   });

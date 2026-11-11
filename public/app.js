@@ -841,7 +841,7 @@ function levelSwitchHtml(st, level, edit) {
   return `<div class="level-switch" role="group" aria-label="Приоритет по срокам">
     ${[3, 2, 1]
       .map(
-        (l) => `<button class="l${l}" aria-pressed="${level === l}" ${edit ? `data-act="level" data-id="${st.id}" data-level="${l}"` : "disabled"}>${levelLabel(l)}</button>`,
+        (l) => `<button class="l${l}" aria-pressed="${level === l}" ${edit ? `data-act="level" data-id="${esc(st.id)}" data-level="${l}"` : "disabled"}>${levelLabel(l)}</button>`,
       )
       .join("")}
   </div>`;
@@ -870,7 +870,7 @@ function renderQueueTab() {
         chance = `${pct}${note}`;
       }
       const toggle = edit
-        ? `<button class="check" role="checkbox" aria-checked="${selected}" aria-label="Сдаёт" data-act="pool-toggle" data-id="${st.id}">${selected ? ICONS.check : ""}</button>`
+        ? `<button class="check" role="checkbox" aria-checked="${selected}" aria-label="Сдаёт" data-act="pool-toggle" data-id="${esc(st.id)}">${selected ? ICONS.check : ""}</button>`
         : `<span class="dot ${selected ? "on" : ""}" title="${selected ? "сдаёт" : "не сдаёт"}"></span>`;
       return `<div class="trow ${selected ? "selected" : ""}">
         <span>${toggle}</span>
@@ -881,7 +881,7 @@ function renderQueueTab() {
         </span>
         <span class="num col-prio">${fmtNum(st.burden)}</span>
         <span class="num">${chance}</span>
-        <span class="act">${edit ? `<button class="btn ghost icon" data-act="student-menu" data-id="${st.id}" aria-label="Действия">${ICONS.more}</button>` : ""}</span>
+        <span class="act">${edit ? `<button class="btn ghost icon" data-act="student-menu" data-id="${esc(st.id)}" aria-label="Действия">${ICONS.more}</button>` : ""}</span>
       </div>`;
     })
     .join("");
@@ -985,7 +985,7 @@ function renderScoring() {
         <span class="num muted">+${fmtNum(delayFor(i, order.length, cutoff))}</span>
         <span class="act">${
           edit
-            ? `<button class="result-toggle" data-act="tail" data-session="${session.id}" data-id="${next}"
+            ? `<button class="result-toggle" data-act="tail" data-session="${esc(session.id)}" data-id="${esc(next)}"
                 title="${tail ? "Отметить, что сдал" : "Отметить, что не успел (вместе со всеми после)"}">${status}</button>`
             : status
         }</span>
@@ -1026,9 +1026,9 @@ function renderScoring() {
         ? `<div class="toolbar scoring-actions">
             ${
               cutoff >= 0
-                ? `<button class="btn" data-act="score" data-session="${session.id}">Подвести итоги</button>
-                   <button class="btn ghost" data-act="all-done" data-session="${session.id}">Сдали все</button>`
-                : `<button class="btn" data-act="all-done" data-session="${session.id}">Сдали все</button>`
+                ? `<button class="btn" data-act="score" data-session="${esc(session.id)}">Подвести итоги</button>
+                   <button class="btn ghost" data-act="all-done" data-session="${esc(session.id)}">Сдали все</button>`
+                : `<button class="btn" data-act="all-done" data-session="${esc(session.id)}">Сдали все</button>`
             }
             <button class="btn danger" data-act="undo">Отменить очередь</button>
           </div>`
@@ -1262,7 +1262,7 @@ function renderSettingsTab() {
       (m) => `<div class="trow ${m.active ? "" : "revoked"}">
         <span class="cell-name"><span class="name">${esc(m.name)}${room.me?.id === m.id ? ` <span class="muted small">(вы)</span>` : ""}</span></span>
         <span class="muted small">${m.role === "owner" ? "Создатель" : m.active ? "Редактор" : "Доступ отозван"}</span>
-        <span class="act">${owner && m.role !== "owner" && m.active ? `<button class="btn ghost sm" data-act="revoke" data-id="${m.id}">Отозвать</button>` : ""}</span>
+        <span class="act">${owner && m.role !== "owner" && m.active ? `<button class="btn ghost sm" data-act="revoke" data-id="${esc(m.id)}">Отозвать</button>` : ""}</span>
       </div>`,
     )
     .join("");
